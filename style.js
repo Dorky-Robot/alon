@@ -1,96 +1,59 @@
-function kebabCaseProp(prop) {
-  if (typeof prop !== 'string') {
-    return undefined;
-  }
-  return prop.replace(/([A-Z])/g, g => `-${g[0].toLowerCase()}`);
-}
-
-function formatCssFunction(obj) {
-  if (obj && Array.isArray(obj.func) && obj.func.length > 0) {
-    const [funcName, ...args] = obj.func;
-
-    const processedArgs = args.map(arg => {
-      if (arg && typeof arg === 'object' && arg.func) {
-        // Special handling for 'calc' function
-        if (funcName === 'calc' && typeof arg === 'string') {
-          return ` ${arg} `;
-        }
-        return formatCssFunction(arg);
-      }
-      return Array.isArray(arg) ? arg.join(' ') : arg;
-    });
-
-    const argsJoined = funcName === 'calc' ? processedArgs.join(' ') : processedArgs.join(', ');
-
-    return `${funcName}(${argsJoined})`;
-  }
-
-  return '';
-}
-
-function formatCssValues(values) {
-  // Handle the case where values is an object with a 'func' key
-  if (typeof values === 'object' && values.func) {
-    return formatCssFunction(values);
-  }
-
-  if (typeof values === 'string') {
-    return values;
-  }
-
-  if (Array.isArray(values)) {
-    return values.map(value => {
-      if (typeof value === 'object' && value.func) {
-        return formatCssFunction(value);
-      } else if (Array.isArray(value)) {
-        // Recursively process each value in the array
-        return formatCssValues(value);
-      }
-      return value;
-    }).join(' '); // Join with a space for simple arrays
-  }
-  return '';
-}
-
-function processCssProperty(prop, value) {
-  if (typeof prop !== 'string') return '';
-  return `${kebabCaseProp(prop)}:${formatCssValues(value)};`;
-}
-
 function style(cssData) {
-  if (!Array.isArray(cssData)) {
-    throw new Error('Invalid cssData: Expected an array');
-  }
+  return processCssData("", cssData);
+}
 
-  let css = '';
+function processCssData(parentSelector, data) {
+  let css = "";
 
-  for (const [selector, styles] of cssData) {
-    if (typeof selector === 'string') {
-      css += `${selector}{`;
+  if (data && data.length > 0) {
+    const [key, ...value] = data;
 
-      for (const prop in styles) {
-        if (styles.hasOwnProperty(prop)) {
-          const value = styles[prop];
-          if (typeof value === 'object' && value.func) {
-            css += `${kebabCaseProp(prop)}:${formatCssFunction(value)};`;
-          } else {
-            css += `${kebabCaseProp(prop)}:${formatCssValues(value)};`;
-          }
-        }
-      }
+    if (Array.isArray(value[0])) {
+      const attrs = value.reduce((cssPartial, attr) => {
+        return cssPartial += processCssData(undefined, attr);
+      }, '');
 
-      css += '}';
+      css = `${key}{${attrs}}`;
+    } else {
+      css = `${key}:${value};`;
     }
   }
 
   return css;
 }
 
-module.exports = {
-  style,
-  kebabCaseProp,
-  processCssProperty,
-  formatCssValues,
-  formatCssFunction,
-};
+// function processCssData(parentSelector, data) {
+//   let css = "";
 
+//   for (let i = 0; i < data.length; i += 2) {
+//     const key = data[i];
+//     const value = data[i + 1];
+
+//     if (Array.isArray(value)) {
+//       // Handle nested structures (like media queries or pseudo-classes)
+//       let newSelector = (typeof key === 'string' && key.startsWith('@')) ? key + ' ' + parentSelector : parentSelector + key;
+//       css += processCssData(newSelector, value);
+//     } else if (typeof value === 'object' && value.func) {
+//       // Handle CSS functions
+//       css += `${ parentSelector } { ${ key }: ${ processFunction(value.func) }; } \n`;
+//     } else if (typeof key === 'string') {
+//       // Regular CSS properties
+//       css += `${ parentSelector } { ${ camelCaseToDash(key) }: ${ value }; } \n`;
+//     }
+//   }
+
+//   return css;
+// }
+
+// function processFunction(funcArray) {
+//   const [funcName, ...args] = funcArray;
+//   return `${ funcName } (${ args.map(arg => Array.isArray(arg) ? processFunction(arg) : arg).join(', ') })`;
+// }
+
+// function camelCaseToDash(str) {
+//   return str.replace(/([A-Z])/g, g => `- ${ g[0].toLowerCase() } `);
+// }
+
+module.exports = {
+  style
+}
