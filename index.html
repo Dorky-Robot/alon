@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Web Page</title>
+    <script src="style.js"></script>
+    <script>
+      // Using the style function
+      const styles = style({
+        ".grid-container": {
+          display: "grid",
+          "grid-template-columns": "repeat(8, 1fr)",
+          gap: "10px",
+        },
+        "@media screen and (max-width: 768px)": {
+          ".grid-container": {
+            "grid-template-columns": ["repeat", [4, "1fr"]],
+          },
+        },
+        "@media screen and (max-width: 480px)": {
+          ".grid-container": {
+            "grid-template-columns": "1fr",
+          },
+        },
+        ".grid-item": {
+          border: "1px solid #ccc",
+          padding: "10px",
+          "text-align": "center",
+        },
+      });
+
+      console.log(styles);
+    </script>
+  </head>
+  <body>
+    <div class="toolbar">
+      <button id="add-item" class="plus-button">+</button>
+    </div>
+    <div class="grid-container" id="grid">
+      <div class="grid-item draggable" draggable="true">Drag Me</div>
+      <div class="grid-item draggable" draggable="true">Drag Me</div>
+      <div class="grid-item draggable" draggable="true">Drag Me</div>
+      <div class="grid-item draggable" draggable="true">Drag Me</div>
+      <!-- Pre-existing grid items will be inserted here -->
+    </div>
+
+    <script>
+      // Variables to keep track of the dragged item and placeholder
+      let draggedItem = null;
+      let placeholder = null;
+
+      // Function to create a new grid item
+      function createGridItem() {
+        const newItem = document.createElement("div");
+        newItem.className = "grid-item draggable";
+        newItem.setAttribute("draggable", "true");
+        newItem.textContent = "Drag Me";
+        return newItem;
+      }
+
+      // Function to handle the click event of the add-item button
+      document
+        .getElementById("add-item")
+        .addEventListener("click", function () {
+          const grid = document.getElementById("grid");
+          const newItem = createGridItem();
+          grid.appendChild(newItem);
+        });
+
+      // Event listeners for drag and drop functionality
+      document.addEventListener(
+        "dragstart",
+        function (event) {
+          if (event.target.classList.contains("draggable")) {
+            draggedItem = event.target;
+            event.target.style.opacity = "0.4"; // Make the dragged item semi-transparent
+
+            // Create and insert a placeholder
+            placeholder = document.createElement("div");
+            placeholder.classList.add("grid-item", "placeholder");
+            setTimeout(function () {
+              draggedItem.style.display = "none";
+              grid.insertBefore(placeholder, draggedItem);
+            }, 0);
+          }
+        },
+        false
+      );
+
+      document.addEventListener(
+        "dragover",
+        function (event) {
+          event.preventDefault();
+          const grid = document.getElementById("grid");
+          const closest = document.elementFromPoint(
+            event.clientX,
+            event.clientY
+          );
+          if (
+            closest &&
+            closest !== draggedItem &&
+            closest.classList.contains("grid-item")
+          ) {
+            grid.insertBefore(placeholder, closest);
+          }
+        },
+        false
+      );
+
+      document.addEventListener(
+        "dragend",
+        function (event) {
+          event.preventDefault();
+          if (draggedItem) {
+            draggedItem.style.display = "block";
+            draggedItem.style.opacity = "1"; // Reset the opacity
+            grid.insertBefore(draggedItem, placeholder); // Move the dragged item to the placeholder's position
+            grid.removeChild(placeholder); // Remove the placeholder
+            draggedItem = null; // Reset the dragged item
+          }
+        },
+        false
+      );
+    </script>
+  </body>
+</html>
