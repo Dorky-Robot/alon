@@ -1,59 +1,45 @@
 function style(cssData) {
-  return processCssData("", cssData);
+  return processCssData(undefined, cssData);
 }
 
-function processCssData(parentSelector, data) {
-  let css = "";
+function processCssData(parent, data) {
 
-  if (data && data.length > 0) {
-    const [key, ...value] = data;
+  console.log('data------', data)
+  if (!data || data.length === 0) return '';
 
-    if (Array.isArray(value[0])) {
-      const attrs = value.reduce((cssPartial, attr) => {
-        return cssPartial += processCssData(undefined, attr);
-      }, '');
+  if (isCssProperty(data)) {
+    const [property, ...values] = data;
 
-      css = `${key}{${attrs}}`;
-    } else {
-      css = `${key}:${value};`;
-    }
+    return `${property}:${processCssValues(values)};`;
+  } else if (typeof data[0] === 'string' && Array.isArray(data[1])) {
+    const [selector, values, ...rest] = data;
+
+    return `${selector}{${processCssData(parent, values)}}` + processCssData(parent, rest);
+  } else {
+    return data.map(d => processCssData(parent, d)).join('');
   }
-
-  return css;
 }
 
-// function processCssData(parentSelector, data) {
-//   let css = "";
+function isCssProperty(arr) {
+  return Array.isArray(arr) && arr.every((item) => {
+    return typeof item === 'string' || item.func;
+  });
+}
 
-//   for (let i = 0; i < data.length; i += 2) {
-//     const key = data[i];
-//     const value = data[i + 1];
+function processCssValues(values) {
+  if (typeof values === 'string') {
+    return values;
+  } else if (values.func) {
+    const func = values.func[0];
+    const args = values.func.slice(1);
 
-//     if (Array.isArray(value)) {
-//       // Handle nested structures (like media queries or pseudo-classes)
-//       let newSelector = (typeof key === 'string' && key.startsWith('@')) ? key + ' ' + parentSelector : parentSelector + key;
-//       css += processCssData(newSelector, value);
-//     } else if (typeof value === 'object' && value.func) {
-//       // Handle CSS functions
-//       css += `${ parentSelector } { ${ key }: ${ processFunction(value.func) }; } \n`;
-//     } else if (typeof key === 'string') {
-//       // Regular CSS properties
-//       css += `${ parentSelector } { ${ camelCaseToDash(key) }: ${ value }; } \n`;
-//     }
-//   }
-
-//   return css;
-// }
-
-// function processFunction(funcArray) {
-//   const [funcName, ...args] = funcArray;
-//   return `${ funcName } (${ args.map(arg => Array.isArray(arg) ? processFunction(arg) : arg).join(', ') })`;
-// }
-
-// function camelCaseToDash(str) {
-//   return str.replace(/([A-Z])/g, g => `- ${ g[0].toLowerCase() } `);
-// }
+    return `${func}(${args.join(',')})`;
+  } else {
+    return values.map(processCssValues).join(' ');
+  }
+}
 
 module.exports = {
-  style
+  style,
+  isCssProperty
 }

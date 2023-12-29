@@ -1,9 +1,6 @@
 const {
   style,
-  formatCssFunction,
-  formatCssValues,
-  kebabCaseProp,
-  processCssProperty
+  isCssProperty
 } = require('./style');
 
 
@@ -14,7 +11,7 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it('handles an empty empty string', () => {
+  it('handles an empty string', () => {
     const input = '';
     const expected = '';
     expect(style(input)).toBe(expected);
@@ -26,47 +23,136 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles css intended for inline style', () => {
-    const input = ['background', 'red'];
-    const expected = 'background:red;';
+  it('handles single CSS property', () => {
+    const input = ['border', '1px', 'solid', 'black'];
+    const expected = 'border:1px solid black;';
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles css intended for inline style', () => {
-    const input = ['.container', ['background', 'red']];
+  it('handles single CSS property in nested array', () => {
+    const input = [
+      ['border', '1px', 'solid', 'black'],
+    ]
+    const expected = 'border:1px solid black;';
+    expect(style(input)).toBe(expected);
+  });
+
+  it('handles multiple CSS properties in nested arrays', () => {
+    const input = [
+      ['border', '1px', 'solid', 'black'],
+      ['color', 'white']
+    ]
+    const expected = 'border:1px solid black;color:white;';
+    expect(style(input)).toBe(expected);
+  });
+
+  it.only('handles multiple CSS properties without array wrap', () => {
+    const input = [
+      'border', '1px',
+      'color', 'white'
+    ]
+    const expected = 'border:1px;color:white;';
+    expect(style(input)).toBe(expected);
+  });
+
+  it('handles CSS class selector with single CSS property', () => {
+    const input = [
+      '.container', ['background', 'red']
+    ]
     const expected = '.container{background:red;}';
     expect(style(input)).toBe(expected);
   });
 
-  it('handles multiple css properties', () => {
-    const input = ['.container', ['background', 'red'], ['color', 'blue']];
+  it('handles CSS class selector with single CSS property in nested array', () => {
+    const input = [
+      '.container', [['background', 'red']]
+    ]
+    const expected = '.container{background:red;}';
+    expect(style(input)).toBe(expected);
+  });
+
+  it('handles multiple CSS properties with CSS class selector', () => {
+    const input = [
+      '.container', [
+        ['background', 'red'],
+        ['color', 'blue']
+      ]
+    ];
     const expected = '.container{background:red;color:blue;}';
     expect(style(input)).toBe(expected);
   });
+
+  it('handles CSS variables', () => {
+    const input = [
+      ':root', [
+        ['--primary-color', '#ff5733'],
+        ['--secondary-color', '#3333ff']
+      ]
+    ];
+    const expected = ':root{--primary-color:#ff5733;--secondary-color:#3333ff;}';
+    expect(style(input)).toBe(expected);
+  });
+
+  it('handles CSS class selector with grid properties', () => {
+    const input = [
+      '.grid-container', [
+        'display', 'grid',
+        'grid-template-columns', { func: ['repeat', 2, '1fr'] }
+      ]
+    ];
+    const expected = '.grid-container{display:grid;grid-template-columns:repeat(2,1fr);}';
+    expect(style(input)).toBe(expected);
+  });
+
+  it('handles CSS class selector with media query and CSS property', () => {
+    const input = [
+      '@media screen and (max-width: var(--max-width))', [
+        '.grid-container', [
+          'grid-template-columns', { func: ['repeat', 1, '1fr'] }
+        ]
+      ]
+    ];
+    const expected = '@media screen and (max-width: var(--max-width)){.grid-container{grid-template-columns:repeat(1,1fr);}}';
+    expect(style(input)).toBe(expected);
+  });
 });
-// describe('style function', () => {
-//   describe.only('kebabCaseProp', () => {
-//     test('converts camelCase to kebab-case for a single word', () => {
-//       const input = 'backgroundColor';
-//       const expected = 'background-color';
-//       expect(kebabCaseProp(input)).toBe(expected);
-//     });
 
-//     test('returns an empty string if the input is empty', () => {
-//       const input = '';
-//       const expected = '';
-//       expect(kebabCaseProp(input)).toBe(expected);
-//     });
 
-//     test('returns undefined for non-string inputs', () => {
-//       const input = null; // or undefined, or 123, etc.
-//       const expected = undefined;
-//       expect(kebabCaseProp(input)).toBe(expected);
-//     });
-//   });
-// });
+describe('isCssProperty', () => {
+  it('returns true for an array of strings', () => {
+    const input = ['color', 'background', 'border'];
+    expect(isCssProperty(input)).toBe(true);
+  });
 
-// describe.only('formatCssFunction', () => {
+  it('returns true for an array of objects with func property', () => {
+    const input = [{ func: ['rotate', '45deg'] }, { func: ['scale', '1.5'] }];
+    expect(isCssProperty(input)).toBe(true);
+  });
+
+  it.only('returns true for a mixed array of strings and objects with func', () => {
+    const input = ['color', { func: ['rotate', '45deg'] }, 'background'];
+    expect(isCssProperty(input)).toBe(true);
+  });
+
+  it('returns true for an empty array', () => {
+    expect(isCssProperty([])).toBe(true);
+  });
+
+  it('returns false for an array with non-string and non-function elements', () => {
+    const input = ['color', 123, { key: 'value' }];
+    expect(isCssProperty(input)).toBe(false);
+  });
+
+  it('returns false for non-array input', () => {
+    expect(isCssProperty('color')).toBe(false);
+    expect(isCssProperty({ func: ['rotate', '45deg'] })).toBe(false);
+    expect(isCssProperty(123)).toBe(false);
+    expect(isCssProperty(null)).toBe(false);
+    expect(isCssProperty(undefined)).toBe(false);
+  });
+});
+
+// describe('formatCssFunction', () => {
 //   test('formats a CSS function with a single argument', () => {
 //     const input = { func: ['rgb', '255', '0', '0'] };
 //     const expected = 'rgb(255, 0, 0)';
@@ -116,7 +202,7 @@ describe('style function', () => {
 //   });
 // });
 
-// describe.only('formatCssValues', () => {
+// describe('formatCssValues', () => {
 //   test('handles scalar value preceding a CSS function', () => {
 //     const input = ['50%', { func: ['translateX', '100px'] }];
 //     const expected = '50% translateX(100px)';

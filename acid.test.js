@@ -4,7 +4,7 @@ const { style } = require('./style');
 describe('style function', () => {
   xit('correctly converts JSON to CSS', () => {
     const cssData = [
-      ":root", { "--max-width": "768px" },
+      ":root", ["--max-width", "768px"],
       ".grid-container", [
         "display", "grid",
         "gridTemplateColumns", { func: ["repeat", 2, "1fr"] },
@@ -32,9 +32,7 @@ describe('style function', () => {
           ["10px", "10px", "5px", "0px", { func: ["rgba", 0, 0, 0, 0.75] }],
           ["inset", "0", "0", "10px", { func: ["rgba", 255, 255, 255, 0.5] }]
         ],
-        ":hover", [
-          "backgroundColor", "lightgray"
-        ]
+        ":hover", ["backgroundColor", "lightgray"]
       ]
     ];
 
