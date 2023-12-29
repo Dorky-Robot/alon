@@ -3,26 +3,38 @@ function style(cssData) {
 }
 
 function processCssData(parent, data) {
-  console.log("parent-----", parent);
-
   if (!data || data.length === 0) return '';
 
   if (isCssProperty(data)) {
-    console.log("data b1-----", data);
     const [property, ...values] = data;
 
     return `${property}:${processCssValues(values)};`;
   } else if (typeof data[0] === 'string' && Array.isArray(data[1])) {
-    console.log("data b2-----", data);
-    const [selector, values, ...rest] = data;
+    const [selector, next, ...rest] = data;
 
-    return `${selector}{${processCssData(selector, values)}}` + processCssData(parent, rest);
+    if (Array.isArray(next[0])) {
+      return `${sel(parent, selector)}{${processCssData(selector, next)}}`
+        + `${processCssData(parent, rest)}`;
+    } else {
+      const [property, value, ...additionalValue] = next;
+
+      console.log("selector----", selector);
+      return `${sel(parent, selector)}{${processCssData(selector, [property, value])}`
+        + `${processCssData(selector, additionalValue)}}`
+        + processCssData(parent, rest)
+    }
   } else {
-    console.log("data b3-----", data);
     return data.map(d => processCssData(parent, d)).join('');
   }
 }
 
+function sel(parent, selector) {
+  if (parent) {
+    return `${parent} ${selector}`;
+  } else {
+    return selector;
+  }
+}
 
 function isCssProperty(arr) {
   return Array.isArray(arr) && arr.every((item) => {
