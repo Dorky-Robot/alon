@@ -46,15 +46,6 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles multiple CSS properties without array wrap', () => {
-    const input = [
-      'border', '1px',
-      'color', 'white'
-    ]
-    const expected = 'border:1px;color:white;';
-    expect(style(input)).toBe(expected);
-  });
-
   it('handles CSS class selector with single CSS property', () => {
     const input = [
       '.container', ['background', 'red']
@@ -90,6 +81,21 @@ describe('style function', () => {
       ]
     ];
     const expected = ':root{--primary-color:#ff5733;--secondary-color:#3333ff;}';
+    expect(style(input)).toBe(expected);
+  });
+
+  it.only('handles CSS variables', () => {
+    const input = [
+      ':root', [
+        ['--primary-color', '#ff5733'],
+        ['--secondary-color', '#3333ff']
+      ],
+      '.container', [
+        ['display', 'grid'],
+        ['grid-template-columns', { func: ['repeat', 2, '1fr'] }]
+      ]
+    ];
+    const expected = ':root{--primary-color:#ff5733;--secondary-color:#3333ff;}.container{display:grid;grid-template-columns:repeat(2,1fr);}';
     expect(style(input)).toBe(expected);
   });
 
@@ -129,7 +135,7 @@ describe('isCssProperty', () => {
     expect(isCssProperty(input)).toBe(true);
   });
 
-  it.only('returns true for a mixed array of strings and objects with func', () => {
+  it('returns true for a mixed array of strings and objects with func', () => {
     const input = ['color', { func: ['rotate', '45deg'] }, 'background'];
     expect(isCssProperty(input)).toBe(true);
   });

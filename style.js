@@ -3,22 +3,26 @@ function style(cssData) {
 }
 
 function processCssData(parent, data) {
+  console.log("parent-----", parent);
 
-  console.log('data------', data)
   if (!data || data.length === 0) return '';
 
   if (isCssProperty(data)) {
+    console.log("data b1-----", data);
     const [property, ...values] = data;
 
     return `${property}:${processCssValues(values)};`;
   } else if (typeof data[0] === 'string' && Array.isArray(data[1])) {
+    console.log("data b2-----", data);
     const [selector, values, ...rest] = data;
 
-    return `${selector}{${processCssData(parent, values)}}` + processCssData(parent, rest);
+    return `${selector}{${processCssData(selector, values)}}` + processCssData(parent, rest);
   } else {
+    console.log("data b3-----", data);
     return data.map(d => processCssData(parent, d)).join('');
   }
 }
+
 
 function isCssProperty(arr) {
   return Array.isArray(arr) && arr.every((item) => {
