@@ -12,21 +12,36 @@ function processCssData(parent, data) {
   } else if (typeof data[0] === 'string' && Array.isArray(data[1])) {
     const [selector, next, ...rest] = data;
 
-    if (Array.isArray(next[0])) {
+    if (selector.startsWith('@media')) {
+      return `${selector}{${processCssData(parent, next)}}`
+        + `${processCssData(parent, rest)}`;
+
+    } else if (Array.isArray(next[0])) {
       return `${sel(parent, selector)}{${processCssData(selector, next)}}`
         + `${processCssData(parent, rest)}`;
-    } else {
-      const [property, value, ...additionalValue] = next;
 
-      console.log("selector----", selector);
+    } else {
+      const [property, value, ...additionalValues] = next;
+
       return `${sel(parent, selector)}{${processCssData(selector, [property, value])}`
-        + `${processCssData(selector, additionalValue)}}`
+        + `${groupInPairs(additionalValues).map(a => processCssData(parent, a)).join('')}}`
         + processCssData(parent, rest)
     }
   } else {
     return data.map(d => processCssData(parent, d)).join('');
   }
 }
+
+function groupInPairs(arr) {
+  const result = [];
+
+  for (let i = 0; i < arr.length; i += 2) {
+    result.push(arr.slice(i, i + 2));
+  }
+
+  return result;
+}
+
 
 function sel(parent, selector) {
   if (parent) {

@@ -118,10 +118,11 @@ describe('style function', () => {
     const input = [
       '.grid-container', [
         'display', 'grid',
-        'grid-template-columns', { func: ['repeat', 2, '1fr'] }
+        'grid-template-columns', { func: ['repeat', 2, '1fr'] },
+        'background', 'red'
       ]
     ];
-    const expected = '.grid-container{display:grid;grid-template-columns:repeat(2,1fr);}';
+    const expected = '.grid-container{display:grid;grid-template-columns:repeat(2,1fr);background:red;}';
     expect(style(input)).toBe(expected);
   });
 
@@ -137,7 +138,7 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles complex CSS structure with media query and CSS properties', () => {
+  it('handles complex CSS structure with media query and CSS properties', () => {
     const input = [
       ':root', [
         ['--max-width', '768px']
@@ -149,7 +150,7 @@ describe('style function', () => {
       ],
       '@media screen and (max-width: var(--max-width))', [
         '.grid-container', [
-          'gridTemplateColumns', { func: ['repeat', 1, '1fr'] }
+          'grid-template-columns', { func: ['repeat', 1, '1fr'] }
         ]
       ]
     ];
