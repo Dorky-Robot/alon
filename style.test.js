@@ -99,6 +99,20 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
+
+
+  it('handles CSS variables with subsequent selectors with wrapper', () => {
+    const input = [
+      '.container', [
+        'display', 'grid',
+        'grid-template-columns', { func: ['repeat', 2, '1fr'] },
+        '.something', ['color', 'red']
+      ]
+    ];
+    const expected = ':root{--primary-color:#ff5733;--secondary-color:#3333ff;}.container{display:grid;grid-template-columns:repeat(2,1fr);}';
+    expect(style(input)).toBe(expected);
+  });
+
   it('handles CSS variables with subsequent selectors without wrapper', () => {
     const input = [
       ':root', [
@@ -163,14 +177,19 @@ describe('style function', () => {
     const input = [
       '.container', [
         ['background', 'red'],
+        [
+          ':hover', [
+            ['background', 'green'],
+            ['color', 'white']
+          ],
+          '.stuff', [
+            '.again', ['background', 'red']
+          ]
+        ],
         ['color', 'blue'],
-        [':hover', [
-          ['background', 'green'],
-          ['color', 'white']
-        ]]
       ]
     ];
-    const expected = '.container{background:red;color:blue;}:hover{background:green;color:white;}';
+    const expected = '.container{background:red;color:blue;}.container:hover{background:green;color:white;}';
     expect(style(input)).toBe(expected);
   });
 });

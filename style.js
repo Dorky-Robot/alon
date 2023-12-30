@@ -1,35 +1,41 @@
 function style(cssData) {
-  return processCssData(undefined, cssData);
+  console.log("cssData-----", cssData);
+  return processCssData(cssData);
 }
 
-function processCssData(parent, data) {
-  if (!data || data.length === 0) return '';
+function processCssData(data) {
+  console.log("data-----", data);
+  let css = '';
+  if (!data || data.length === 0) return css;
 
   if (isCssProperty(data)) {
     const [property, ...values] = data;
 
-    return `${property}:${processCssValues(values)};`;
+    css = `${property}:${processCssValues(values)};`;
   } else if (typeof data[0] === 'string' && Array.isArray(data[1])) {
     const [selector, next, ...rest] = data;
+    console.log("selector-----", selector);
+    console.log("next-----", next);
+    console.log("rest-----", rest);
 
     if (selector.startsWith('@media')) {
-      return `${selector}{${processCssData(parent, next)}}`
-        + `${processCssData(parent, rest)}`;
-
+      css = `${selector}{${processCssData(next)}}`
+        + `${processCssData(rest)}`;
     } else if (Array.isArray(next[0])) {
-      return `${sel(parent, selector)}{${processCssData(selector, next)}}`
-        + `${processCssData(parent, rest)}`;
-
+      css = `${selector}{${processCssData(next)}}`
+        + `${processCssData(rest)}`;
     } else {
       const [property, value, ...additionalValues] = next;
 
-      return `${sel(parent, selector)}{${processCssData(selector, [property, value])}`
-        + `${groupInPairs(additionalValues).map(a => processCssData(parent, a)).join('')}}`
-        + processCssData(parent, rest)
+      css = `${selector}{${processCssData([property, value])}`
+        + `${groupInPairs(additionalValues).map(processCssData).join('')}}`
+        + processCssData(rest)
     }
   } else {
-    return data.map(d => processCssData(parent, d)).join('');
+    css = data.map(processCssData).join('');
   }
+
+  return css;
 }
 
 function groupInPairs(arr) {
@@ -40,6 +46,10 @@ function groupInPairs(arr) {
   }
 
   return result;
+}
+
+function extractNested(cssString) {
+  const regex = /[{;]+[^{]*[^{]+\s*({[^}]*)/g;
 }
 
 
