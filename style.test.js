@@ -158,6 +158,21 @@ describe('style function', () => {
       '@media screen and (max-width: var(--max-width)){.grid-container{grid-template-columns:repeat(1,1fr);}}';
     expect(style(input)).toBe(expected);
   });
+
+  it.only('handles CSS class selector with pseudo selector', () => {
+    const input = [
+      '.container', [
+        ['background', 'red'],
+        ['color', 'blue'],
+        [':hover', [
+          ['background', 'green'],
+          ['color', 'white']
+        ]]
+      ]
+    ];
+    const expected = '.container{background:red;color:blue;}:hover{background:green;color:white;}';
+    expect(style(input)).toBe(expected);
+  });
 });
 
 
