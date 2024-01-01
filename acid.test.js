@@ -19,7 +19,13 @@ describe('style function', () => {
         "border", { func: ["1px", "solid", "#ccc"] },
         "padding", "10px",
         "textAlign", "center",
-        "background", ["red", { func: ["linear-gradient", "to right", "red", "orange"] }],
+        ".item", [
+          "backgroundColor", "red",
+        ],
+        "background", [
+          "red",
+          { func: ["linear-gradient", "to right", "red", "orange"] }
+        ],
         "transform", [
           { func: ["rotate", "45deg"] },
           { func: ["translateX", "100px"] }
@@ -32,7 +38,7 @@ describe('style function', () => {
           ["10px", "10px", "5px", "0px", { func: ["rgba", 0, 0, 0, 0.75] }],
           ["inset", "0", "0", "10px", { func: ["rgba", 255, 255, 255, 0.5] }]
         ],
-        ":hover", ["backgroundColor", "lightgray"]
+        ":hover", ["backgroundColor", "gray"]
       ]
     ];
 
@@ -42,7 +48,7 @@ describe('style function', () => {
       + `.grid-container{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}`
       + `@media screen and (max-width:--max-width){.grid-container{grid-template-columns:repeat(2,1fr);}}`
       + `.grid-item{border:1px solid #ccc;padding:10px;text-align:center;background:red linear-gradient(to right,red,orange);transform:rotate(45deg) translateX(100px);filter:blur(5px) brightness(0.8);box-shadow:10px 10px 5px 0px rgba(0,0,0,0.75),inset 0 0 10px rgba(255,255,255,0.5);}`
-      + `.grid-item:hover{background-color:lightgray;}`;
+      + `.grid-item:hover{background-color:gray;}`;
 
     expect(actualCss).toBe(expectedCss);
   });

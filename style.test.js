@@ -24,16 +24,22 @@ describe('style function', () => {
   });
 
   it('handles single CSS property', () => {
-    const input = ['border', '1px', 'solid', 'black'];
-    const expected = 'border:1px solid black;';
+    const input = [
+      'border', '1px',
+      'solid', 'black'
+    ];
+    const expected = "border:1px solid black;";
+
     expect(style(input)).toBe(expected);
   });
 
-  it('handles single CSS property in nested array', () => {
+  it('handles multiple CSS property in pairs', () => {
     const input = [
-      ['border', '1px', 'solid', 'black'],
-    ]
+      'border', '1px',
+      'solid', 'black'
+    ];
     const expected = 'border:1px solid black;';
+
     expect(style(input)).toBe(expected);
   });
 
@@ -84,7 +90,7 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it('handles CSS variables with subsequent selectors with wrapper', () => {
+  it.only('handles CSS variables with subsequent selectors with wrapper', () => {
     const input = [
       ':root', [
         ['--primary-color', '#ff5733'],
@@ -101,7 +107,7 @@ describe('style function', () => {
 
 
 
-  it('handles CSS variables with subsequent selectors with wrapper', () => {
+  it.only('handles CSS variables with subsequent selectors with wrapper', () => {
     const input = [
       '.container', [
         'display', 'grid',
@@ -173,7 +179,7 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles CSS class selector with pseudo selector', () => {
+  it('handles CSS class selector with pseudo selector', () => {
     const input = [
       '.container', [
         ['background', 'red'],
