@@ -4,9 +4,9 @@ function style(cssData) {
 }
 
 function processCssData(data, parent) {
-  let css = '';
-  if (!data || data.length === 0) return css;
+  if (!data || data.length === 0 || Object.keys(data).length === 0) return data;
 
+  let css;
   if (isCssProperty(data)) {
     const [property, ...values] = data;
 
@@ -15,12 +15,9 @@ function processCssData(data, parent) {
     const [selector, next, ...rest] = data;
     const nextSelector = sel(parent, selector);
 
-    if (selector.startsWith('@media')) {
-      css = `${nextSelector}{${processCssData(next, nextSelector)}`
-        + `${processCssData(rest, nextSelector)}`;
-    } else if (Array.isArray(next[0])) {
-      css = `${nextSelector}{${processCssData(next, nextSelector)}}`
-        + `${processCssData(rest, nextSelector)}`;
+    if (selector.startsWith('@media') || Array.isArray(next[0])) {
+      css = `${selector}{${processCssData(next, nextSelector)}}`
+        + `${processCssData(rest, parent)}`;
     } else {
       const [property, value, ...additionalValues] = next;
       const nextSelector = sel(parent, selector);

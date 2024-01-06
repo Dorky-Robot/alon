@@ -7,20 +7,27 @@ const {
 describe('style function', () => {
   it('handles an empty array', () => {
     const input = [];
-    const expected = '';
-    expect(style(input)).toBe(expected);
+    const expected = [];
+    expect(style(input)).toStrictEqual(expected);
   });
 
   it('handles an empty string', () => {
     const input = '';
     const expected = '';
-    expect(style(input)).toBe(expected);
+    expect(style(input)).toStrictEqual(expected);
   });
+
+  it('handles an empty string', () => {
+    const input = {};
+    const expected = {};
+    expect(style(input)).toStrictEqual(expected);
+  });
+
 
   it('handles undefined input', () => {
     const input = undefined;
-    const expected = '';
-    expect(style(input)).toBe(expected);
+    const expected = undefined;
+    expect(style(input)).toStrictEqual(expected);
   });
 
   it('handles single CSS property', () => {
