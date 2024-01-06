@@ -1,6 +1,5 @@
 function style(cssData) {
-  console.log("cssData-----", cssData);
-  return processCssData(cssData);
+  return compile(processCssData(cssData));
 }
 
 function processCssData(data, parent) {
@@ -15,16 +14,31 @@ function processCssData(data, parent) {
     const [selector, next, ...rest] = data;
     const nextSelector = sel(parent, selector);
 
+    css = {}
+
     if (selector.startsWith('@media') || Array.isArray(next[0])) {
-      css = `${selector}{${processCssData(next, nextSelector)}}`
-        + `${processCssData(rest, parent)}`;
+      css[nextSelector] = processCssData(next, nextSelector);
     } else {
       const [property, value, ...additionalValues] = next;
       const nextSelector = sel(parent, selector);
 
-      css = `${nextSelector}{${processCssData([property, value], nextSelector)}`
-        + `${groupInPairs(additionalValues).map(a => processCssData(a, nextSelector)).join('')}}`
-        + processCssData(rest, nextSelector)
+      css[nextSelector] = processCssData([property, value], nextSelector)
+
+      if (additionalValues.length > 0) {
+        groupInPairs(additionalValues).forEach((a) => {
+          const additional = processCssData(a, nextSelector);
+
+          if (typeof additional === 'string') {
+            css[nextSelector] += additional;
+          } else {
+            css = merge(css, additional);
+          }
+        });
+      }
+    }
+
+    if (rest.length > 0) {
+      css = merge(css, processCssData(rest, parent));
     }
   } else {
     css = data.map(processCssData).join('');
@@ -43,10 +57,22 @@ function groupInPairs(arr) {
   return result;
 }
 
-function extractNested(cssString) {
-  const regex = /[{;]+[^{]*[^{]+\s*({[^}]*)/g;
+function merge(...objects) {
+  return Object.assign({}, ...objects);
 }
 
+function compile(jscss) {
+  if (!jscss || jscss.length === 0 || Object.keys(jscss).length === 0) return jscss;
+
+  if (typeof jscss === 'string') return jscss;
+  let css = '';
+
+  for (let key in jscss) {
+    css += `${key}{${jscss[key]}}`;
+  }
+
+  return css;
+}
 
 function sel(parent, selector) {
   if (parent) {

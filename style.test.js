@@ -116,7 +116,7 @@ describe('style function', () => {
         '.something', ['color', 'red']
       ]
     ];
-    const expected = ".container{display:grid;grid-template-columns:repeat(2,1fr);}.container .something{color: red;}";
+    const expected = ".container{display:grid;grid-template-columns:repeat(2,1fr);}.container .something{color:red;}";
     expect(style(input)).toBe(expected);
   });
 
