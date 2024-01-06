@@ -109,7 +109,7 @@ describe('style function', () => {
         '.something', ['color', 'red']
       ]
     ];
-    const expected = ':root{--primary-color:#ff5733;--secondary-color:#3333ff;}.container{display:grid;grid-template-columns:repeat(2,1fr);}';
+    const expected = ".container{display:grid;grid-template-columns:repeat(2,1fr);}.container .something{color: red;}";
     expect(style(input)).toBe(expected);
   });
 
@@ -173,7 +173,7 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles CSS class selector with pseudo selector', () => {
+  it('handles CSS class selector with pseudo selector', () => {
     const input = [
       '.container', [
         ['background', 'red'],

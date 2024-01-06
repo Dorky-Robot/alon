@@ -3,8 +3,7 @@ function style(cssData) {
   return processCssData(cssData);
 }
 
-function processCssData(data) {
-  console.log("data-----", data);
+function processCssData(data, parent) {
   let css = '';
   if (!data || data.length === 0) return css;
 
@@ -14,22 +13,21 @@ function processCssData(data) {
     css = `${property}:${processCssValues(values)};`;
   } else if (typeof data[0] === 'string' && Array.isArray(data[1])) {
     const [selector, next, ...rest] = data;
-    console.log("selector-----", selector);
-    console.log("next-----", next);
-    console.log("rest-----", rest);
+    const nextSelector = sel(parent, selector);
 
     if (selector.startsWith('@media')) {
-      css = `${selector}{${processCssData(next)}}`
-        + `${processCssData(rest)}`;
+      css = `${nextSelector}{${processCssData(next, nextSelector)}`
+        + `${processCssData(rest, nextSelector)}`;
     } else if (Array.isArray(next[0])) {
-      css = `${selector}{${processCssData(next)}}`
-        + `${processCssData(rest)}`;
+      css = `${nextSelector}{${processCssData(next, nextSelector)}}`
+        + `${processCssData(rest, nextSelector)}`;
     } else {
       const [property, value, ...additionalValues] = next;
+      const nextSelector = sel(parent, selector);
 
-      css = `${selector}{${processCssData([property, value])}`
-        + `${groupInPairs(additionalValues).map(processCssData).join('')}}`
-        + processCssData(rest)
+      css = `${nextSelector}{${processCssData([property, value], nextSelector)}`
+        + `${groupInPairs(additionalValues).map(a => processCssData(a, nextSelector)).join('')}}`
+        + processCssData(rest, nextSelector)
     }
   } else {
     css = data.map(processCssData).join('');
