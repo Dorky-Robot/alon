@@ -16,7 +16,13 @@ function processCssData(data, parent) {
 
     css = {}
 
-    if (selector.startsWith('@media') || Array.isArray(next[0])) {
+    if (selector.startsWith('@media')) {
+      const nested = {}
+      nested[next[0]] = processCssData(next[1], parent)
+
+      css[selector] = nested
+    }
+    else if (Array.isArray(next[0])) {
       css[nextSelector] = processCssData(next, nextSelector);
     } else {
       const [property, value, ...additionalValues] = next;
@@ -24,24 +30,34 @@ function processCssData(data, parent) {
 
       css[nextSelector] = processCssData([property, value], nextSelector)
 
-      if (additionalValues.length > 0) {
-        groupInPairs(additionalValues).forEach((a) => {
-          const additional = processCssData(a, nextSelector);
+      for (let i = 0; i < additionalValues.length; i++) {
+        const value = additionalValues[i];
+        let additional;
 
-          if (typeof additional === 'string') {
-            css[nextSelector] += additional;
-          } else {
-            css = merge(css, additional);
-          }
-        });
+        if (typeof value === 'string') {
+          additional = processCssData(
+            [additionalValues[i], additionalValues[i + 1]],
+            nextSelector
+          );
+
+          i++;
+        } else {
+          additional = processCssData(value, nextSelector);
+        }
+
+        if (typeof additional === 'string') {
+          css[nextSelector] += additional;
+        } else {
+          css = merge(css, additional);
+        }
       }
     }
 
-    if (rest.length > 0) {
-      css = merge(css, processCssData(rest, parent));
-    }
+    css = merge(css, processCssData(rest, parent));
   } else {
-    css = data.map(processCssData).join('');
+    css = data
+      .map((d) => processCssData(d, parent))
+      .join('');
   }
 
   return css;
@@ -68,7 +84,12 @@ function compile(jscss) {
   let css = '';
 
   for (let key in jscss) {
-    css += `${key}{${jscss[key]}}`;
+    if (typeof jscss[key] === 'object') {
+      css += `${key}{${compile(jscss[key])}}`;
+    } else {
+      css += `${key}{${jscss[key]}}`;
+    }
+
   }
 
   return css;

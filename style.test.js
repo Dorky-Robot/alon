@@ -108,6 +108,19 @@ describe('style function', () => {
 
 
 
+  it('handles all the variations of css property formatting', () => {
+    const input = [
+      '.container', [
+        'display', 'grid',
+        ['border', '1px', 'solid', 'black'],
+        'grid-template-columns', { func: ['repeat', 2, '1fr'] },
+        '.something', ['color', 'red']
+      ]
+    ];
+    const expected = ".container{display:grid;border:1px solid black;grid-template-columns:repeat(2,1fr);}.container .something{color:red;}";
+    expect(style(input)).toBe(expected);
+  });
+
   it('handles CSS variables with subsequent selectors with wrapper', () => {
     const input = [
       '.container', [
