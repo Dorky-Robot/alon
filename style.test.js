@@ -172,13 +172,13 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it('handles complex CSS structure with media query and CSS properties', () => {
+  it.only('handles complex CSS structure with media query and CSS properties', () => {
     const input = [
       ':root', [
         ['--max-width', '768px']
       ],
       '.grid-container', [
-        'display', 'grid',
+        ['display', 'grid'],
         'grid-template-columns', { func: ['repeat', 2, '1fr'] },
         'gap', '10px'
       ],

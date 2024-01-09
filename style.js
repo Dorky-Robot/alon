@@ -55,22 +55,12 @@ function processCssData(data, parent) {
 
     css = merge(css, processCssData(rest, parent));
   } else {
-    css = data
-      .map((d) => processCssData(d, parent))
-      .join('');
+    for (let i = 0; i < data.length; i++) {
+      css += processCssData(data[i], parent);
+    }
   }
 
   return css;
-}
-
-function groupInPairs(arr) {
-  const result = [];
-
-  for (let i = 0; i < arr.length; i += 2) {
-    result.push(arr.slice(i, i + 2));
-  }
-
-  return result;
 }
 
 function merge(...objects) {
