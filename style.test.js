@@ -36,7 +36,7 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it('handles single CSS property in nested array', () => {
+  it.only('handles single CSS property in nested array', () => {
     const input = [
       ['border', '1px', 'solid', 'black'],
     ]
@@ -54,17 +54,17 @@ describe('style function', () => {
   });
 
   it('handles CSS class selector with single CSS property', () => {
-    const input = [
-      '.container', ['background', 'red']
-    ]
+    const input = {
+      '.container': ['background', 'red']
+    }
     const expected = '.container{background:red;}';
     expect(style(input)).toBe(expected);
   });
 
   it('handles CSS class selector with single CSS property in nested array', () => {
-    const input = [
-      '.container', [['background', 'red']]
-    ]
+    const input = {
+      '.container': [['background', 'red']]
+    }
     const expected = '.container{background:red;}';
     expect(style(input)).toBe(expected);
   });
@@ -109,14 +109,14 @@ describe('style function', () => {
 
 
   it('handles all the variations of css property formatting', () => {
-    const input = [
-      '.container', [
-        'display', 'grid',
+    const input = {
+      '.container': [
+        ['display', 'grid'],
         ['border', '1px', 'solid', 'black'],
-        'grid-template-columns', { func: ['repeat', 2, '1fr'] },
-        '.something', ['color', 'red']
+        ['grid-template-columns', { func: ['repeat', 2, '1fr'] }],
+        { '.something': ['color', 'red'] }
       ]
-    ];
+    };
     const expected = ".container{display:grid;border:1px solid black;grid-template-columns:repeat(2,1fr);}.container .something{color:red;}";
     expect(style(input)).toBe(expected);
   });
@@ -134,16 +134,16 @@ describe('style function', () => {
   });
 
   it('handles CSS variables with subsequent selectors without wrapper', () => {
-    const input = [
-      ':root', [
+    const input = {
+      ':root': [
         '--primary-color', '#ff5733',
         '--secondary-color', '#3333ff'
       ],
-      '.container', [
+      '.container': [
         'display', 'grid',
         'grid-template-columns', { func: ['repeat', 2, '1fr'] }
       ]
-    ];
+    };
     const expected = ':root{--primary-color:#ff5733;--secondary-color:#3333ff;}.container{display:grid;grid-template-columns:repeat(2,1fr);}';
     expect(style(input)).toBe(expected);
   });
@@ -172,7 +172,7 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles complex CSS structure with media query and CSS properties', () => {
+  it('handles complex CSS structure with media query and CSS properties', () => {
     const input = [
       ':root', [
         ['--max-width', '768px']

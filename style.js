@@ -1,102 +1,72 @@
-function style(cssData) {
-  return compile(processCssData(cssData));
+function style(jscss) {
+  return compile(processCssData(jscss));
 }
 
-function processCssData(data, parent) {
-  if (!data || data.length === 0 || Object.keys(data).length === 0) return data;
+function processCssData(jscss, parent) {
+  if (isBlank(jscss)) return jscss;
 
-  let css;
-  if (isCssProperty(data)) {
-    const [property, ...values] = data;
+  if (typeof jscss === 'object' && !Array.isArray(jscss)) {
+    return Object.entries(jscss).reduce((css, [key, value]) => {
+      css[key] = css[key] || '';
+      css[key] += processCssData(value, key);
+      return css;
+    }, {});
+  } else if (Array.isArray(jscss[0]) && jscss.length > 1) {
+    const r = jscss.reduce((c, jscss) => {
+      c += processCssData(jscss, parent)
+      return c;
+    }, '');
 
-    css = `${property}:${processCssValues(values)};`;
-  } else if (typeof data[0] === 'string' && Array.isArray(data[1])) {
-    const [selector, next, ...rest] = data;
-    const nextSelector = sel(parent, selector);
-
-    css = {}
-
-    if (selector.startsWith('@media')) {
-      const nested = {}
-      nested[next[0]] = processCssData(next[1], parent)
-
-      css[selector] = nested
-    }
-    else if (Array.isArray(next[0])) {
-      css[nextSelector] = processCssData(next, nextSelector);
+    if (parent) {
+      const css = {};
+      css[parent] = r
+      return css;
     } else {
-      const [property, value, ...additionalValues] = next;
-      const nextSelector = sel(parent, selector);
-
-      css[nextSelector] = processCssData([property, value], nextSelector)
-
-      for (let i = 0; i < additionalValues.length; i++) {
-        const value = additionalValues[i];
-        let additional;
-
-        if (typeof value === 'string') {
-          additional = processCssData(
-            [additionalValues[i], additionalValues[i + 1]],
-            nextSelector
-          );
-
-          i++;
-        } else {
-          additional = processCssData(value, nextSelector);
-        }
-
-        if (typeof additional === 'string') {
-          css[nextSelector] += additional;
-        } else {
-          css = merge(css, additional);
-        }
-      }
+      return r
     }
-
-    css = merge(css, processCssData(rest, parent));
   } else {
-    for (let i = 0; i < data.length; i++) {
-      css += processCssData(data[i], parent);
-    }
+    const [property, ...values] = jscss;
+    return `${property}:${processCssValues(values)};`;
   }
-
-  return css;
 }
 
-function merge(...objects) {
-  return Object.assign({}, ...objects);
+function set(css, key, value) {
+  css[key] = css[key] || '';
+  css[key] += value;
 }
+
 
 function compile(jscss) {
-  if (!jscss || jscss.length === 0 || Object.keys(jscss).length === 0) return jscss;
+  let css = jscss;
 
-  if (typeof jscss === 'string') return jscss;
-  let css = '';
+  if (
+    typeof jscss === 'object'
+    && !Array.isArray(jscss)
+    && !isBlank(jscss)
+  ) {
+    css = '';
 
-  for (let key in jscss) {
-    if (typeof jscss[key] === 'object') {
+    Object.keys(jscss).forEach(key => {
       css += `${key}{${compile(jscss[key])}}`;
-    } else {
-      css += `${key}{${jscss[key]}}`;
-    }
-
+    });
   }
 
   return css;
 }
 
-function sel(parent, selector) {
-  if (parent) {
-    return `${parent} ${selector}`;
-  } else {
-    return selector;
+const jscss = {
+  ":root": {
+    "--primary-color": "#ff5733",
+    "--secondary-color": "#3333ff"
+  },
+  ".container": {
+    "display": "grid",
+    "grid-template-columns": "repeat(2, 1fr)"
   }
-}
+};
 
-function isCssProperty(arr) {
-  return Array.isArray(arr) && arr.every((item) => {
-    return typeof item === 'string' || item.func;
-  });
+function isBlank(o) {
+  return !o || o.length === 0 || Object.keys(o).length === 0;
 }
 
 function processCssValues(values) {
@@ -113,6 +83,5 @@ function processCssValues(values) {
 }
 
 module.exports = {
-  style,
-  isCssProperty
+  style
 }
