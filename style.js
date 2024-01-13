@@ -1,40 +1,63 @@
 function style(jscss) {
-  return compile(processCssData(jscss));
+  if (isBlank(jscss)) return jscss;
+  return compile(process({ jscss }));
 }
 
-function processCssData(jscss, parent) {
-  if (isBlank(jscss)) return jscss;
+function process({ jscss, parent }) {
+  let css;
 
-  if (typeof jscss === 'object' && !Array.isArray(jscss)) {
-    return Object.entries(jscss).reduce((css, [key, value]) => {
-      css[key] = css[key] || '';
-      css[key] += processCssData(value, key);
-      return css;
-    }, {});
-  } else if (Array.isArray(jscss[0]) && jscss.length > 1) {
-    const r = jscss.reduce((c, jscss) => {
-      c += processCssData(jscss, parent)
-      return c;
-    }, '');
+  if (Array.isArray(jscss) && typeof jscss[0] === 'string') {
+    const [propName, ...values] = jscss;
+    css = `${propName}:${processCssValues(values)};`;
+  } else if (Array.isArray(jscss)) {
+    css = parent ? {} : '';
 
-    if (parent) {
-      const css = {};
-      css[parent] = r
-      return css;
-    } else {
-      return r
+    for (let value of jscss) {
+      const r = process({ jscss: value, parent: parent });
+
+      if (typeof r === 'string') {
+        if (parent) {
+          css[parent] = css[parent] || '';
+          css[parent] += r;
+        } else {
+          css += r;
+        }
+      } else {
+        css = { ...css, ...r };
+      }
     }
   } else {
-    const [property, ...values] = jscss;
-    return `${property}:${processCssValues(values)};`;
+    css = {};
+
+    for (let [key, value] of Object.entries(jscss)) {
+      if (key.startsWith('@media')) {
+        css[key] = process({ jscss: value, parent: parent });
+      } else {
+        const selector = sel(parent, key);
+        const r = process({ jscss: value, parent: selector });
+
+        if (typeof r === 'string') {
+          css[selector] = css[selector] || '';
+          css[selector] += r
+        } else {
+          css = { ...css, ...r };
+        }
+      }
+
+      css
+    }
+  }
+
+  return css;
+}
+
+function sel(parent, selector) {
+  if (parent) {
+    return `${parent} ${selector}`;
+  } else {
+    return selector;
   }
 }
-
-function set(css, key, value) {
-  css[key] = css[key] || '';
-  css[key] += value;
-}
-
 
 function compile(jscss) {
   let css = jscss;
@@ -53,17 +76,6 @@ function compile(jscss) {
 
   return css;
 }
-
-const jscss = {
-  ":root": {
-    "--primary-color": "#ff5733",
-    "--secondary-color": "#3333ff"
-  },
-  ".container": {
-    "display": "grid",
-    "grid-template-columns": "repeat(2, 1fr)"
-  }
-};
 
 function isBlank(o) {
   return !o || o.length === 0 || Object.keys(o).length === 0;
