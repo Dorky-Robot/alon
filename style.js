@@ -3,48 +3,27 @@ function style(jscss) {
   return compile(process({ jscss }));
 }
 
-function process({ jscss, parent }) {
-  let css;
-
+const NO_SELECTOR = '__*__'
+function process({ jscss, parent, css = {}, nested }) {
   if (Array.isArray(jscss) && typeof jscss[0] === 'string') {
     const [propName, ...values] = jscss;
-    css = `${propName}:${processCssValues(values)};`;
+    const prop = `${propName}:${processCssValues(values)};`;
+    const target = nested ? (css[nested] = css[nested] || {}) : css;
+    const key = parent || NO_SELECTOR;
+
+    target[key] = (target[key] || '') + prop;
   } else if (Array.isArray(jscss)) {
-    css = parent ? {} : '';
-
-    for (let value of jscss) {
-      const r = process({ jscss: value, parent: parent });
-
-      if (typeof r === 'string') {
-        if (parent) {
-          css[parent] = css[parent] || '';
-          css[parent] += r;
-        } else {
-          css += r;
-        }
-      } else {
-        css = { ...css, ...r };
-      }
+    for (let item of jscss) {
+      process({ jscss: item, parent, css, nested });
     }
   } else {
-    css = {};
-
     for (let [key, value] of Object.entries(jscss)) {
-      if (key.startsWith('@media')) {
-        css[key] = process({ jscss: value, parent: parent });
-      } else {
-        const selector = sel(parent, key);
-        const r = process({ jscss: value, parent: selector });
-
-        if (typeof r === 'string') {
-          css[selector] = css[selector] || '';
-          css[selector] += r
-        } else {
-          css = { ...css, ...r };
-        }
-      }
-
-      css
+      process({
+        jscss: value,
+        parent: key.startsWith('@') ? parent : sel(parent, key),
+        css,
+        nested: key.startsWith('@') ? key : nested
+      });
     }
   }
 
@@ -53,7 +32,11 @@ function process({ jscss, parent }) {
 
 function sel(parent, selector) {
   if (parent) {
-    return `${parent} ${selector}`;
+    if (selector.startsWith(':')) {
+      return `${parent}${selector}`;
+    } else {
+      return `${parent} ${selector}`;
+    }
   } else {
     return selector;
   }
@@ -70,7 +53,12 @@ function compile(jscss) {
     css = '';
 
     Object.keys(jscss).forEach(key => {
-      css += `${key}{${compile(jscss[key])}}`;
+      if (key === NO_SELECTOR) {
+        css += compile(jscss[key]);
+      } else {
+        css += `${key}{${compile(jscss[key])}}`;
+      }
+
     });
   }
 

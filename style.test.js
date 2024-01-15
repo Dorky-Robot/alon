@@ -173,44 +173,46 @@ describe('style function', () => {
     expect(style(input)).toBe(expected);
   });
 
-  it.only('handles complex CSS structure with media query and CSS properties', () => {
-    const input = [
-      ':root', [
+  it('handles complex CSS structure with media query and CSS properties', () => {
+    const input = {
+      ':root': [
         ['--max-width', '768px']
       ],
-      '.grid-container', [
+      '.grid-container': [
         ['display', 'grid'],
-        'grid-template-columns', { func: ['repeat', 2, '1fr'] },
-        'gap', '10px'
+        ['grid-template-columns', { func: ['repeat', 2, '1fr'] }],
+        ['gap', '10px']
       ],
-      '@media screen and (max-width: var(--max-width))', [
-        '.grid-container', [
-          'grid-template-columns', { func: ['repeat', 1, '1fr'] }
+      '@media screen and (max-width: var(--max-width))': {
+        '.grid-container': [
+          ['grid-template-columns', { func: ['repeat', 1, '1fr'] }]
         ]
-      ]
-    ];
+      }
+    };
     const expected = ':root{--max-width:768px;}.grid-container{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}' +
       '@media screen and (max-width: var(--max-width)){.grid-container{grid-template-columns:repeat(1,1fr);}}';
     expect(style(input)).toBe(expected);
   });
 
   it('handles CSS class selector with pseudo selector', () => {
-    const input = [
-      '.container', [
+    const input = {
+      '.container': [
         ['background', 'red'],
-        [
-          ':hover', [
+        {
+          ':hover': [
             ['background', 'green'],
             ['color', 'white']
           ],
-          '.stuff', [
-            '.again', ['background', 'red']
-          ]
-        ],
+          '.stuff': {
+            '.again': [
+              ['background', 'red']
+            ]
+          }
+        },
         ['color', 'blue'],
       ]
-    ];
-    const expected = '.container{background:red;color:blue;}.container:hover{background:green;color:white;}';
+    };
+    const expected = ".container{background:red;color:blue;}.container:hover{background:green;color:white;}.container .stuff .again{background:red;}";
     expect(style(input)).toBe(expected);
   });
 });
