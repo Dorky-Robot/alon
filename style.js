@@ -37,15 +37,14 @@ function sel(parent, selector) {
 
 
 function compile(jscss) {
-  if (typeof jscss !== 'object' || Array.isArray(jscss) || isBlank(jscss)) {
-    return jscss;
+  if (typeof jscss === 'object' && !Array.isArray(jscss) && !isBlank(jscss)) {
+    return Object.keys(jscss).reduce((acc, key) => {
+      const content = compile(jscss[key]);
+      return acc + (key === NO_SELECTOR ? content : `${key}{${content}}`);
+    }, '');
   }
-
-  return Object.entries(jscss).map(([key, value]) =>
-    key === NO_SELECTOR ? compile(value) : `${key}{${compile(value)}}`
-  ).join('');
+  return jscss;
 }
-
 
 function isBlank(o) {
   return !o || o.length === 0 || Object.keys(o).length === 0;
