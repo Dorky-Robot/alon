@@ -31,39 +31,21 @@ function process({ jscss, parent, css = {}, nested }) {
 }
 
 function sel(parent, selector) {
-  if (parent) {
-    if (selector.startsWith(':')) {
-      return `${parent}${selector}`;
-    } else {
-      return `${parent} ${selector}`;
-    }
-  } else {
-    return selector;
-  }
+  if (!parent) return selector;
+  return parent + (selector.startsWith(':') ? '' : ' ') + selector;
 }
+
 
 function compile(jscss) {
-  let css = jscss;
-
-  if (
-    typeof jscss === 'object'
-    && !Array.isArray(jscss)
-    && !isBlank(jscss)
-  ) {
-    css = '';
-
-    Object.keys(jscss).forEach(key => {
-      if (key === NO_SELECTOR) {
-        css += compile(jscss[key]);
-      } else {
-        css += `${key}{${compile(jscss[key])}}`;
-      }
-
-    });
+  if (typeof jscss !== 'object' || Array.isArray(jscss) || isBlank(jscss)) {
+    return jscss;
   }
 
-  return css;
+  return Object.entries(jscss).map(([key, value]) =>
+    key === NO_SELECTOR ? compile(value) : `${key}{${compile(value)}}`
+  ).join('');
 }
+
 
 function isBlank(o) {
   return !o || o.length === 0 || Object.keys(o).length === 0;
