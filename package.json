@@ -4,13 +4,14 @@
   "description": "A purely Functional ui library.",
   "main": "pure.ui.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "habiscript": "rm -rf ./src/habiscript/* && mkdir -p ./src/habiscript/ && cp ./node_modules/habiscript/dist/*.* ./src/habiscript/"
   },
   "author": "Felix Flores",
   "license": "ISC",
   "dependencies": {
-    "katha.js": "^0.15.0",
-    "nestml": "^1.0.11"
+    "habiscript": "^1.2.0",
+    "katha.js": "^0.15.0"
   },
   "devDependencies": {
     "jest": "^29.7.0"

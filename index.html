@@ -4,30 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Web Page</title>
-    <script src="style.js"></script>
     <script>
       // Using the style function
       const styles = style({
-        ".grid-container": {
-          display: "grid",
-          "grid-template-columns": "repeat(8, 1fr)",
-          gap: "10px",
-        },
+        ".grid-container": [
+          ["display", "grid"],
+          ["grid-template-columns", "repeat(8, 1fr)"],
+          ["gap", "10px"],
+        ],
         "@media screen and (max-width: 768px)": {
-          ".grid-container": {
-            "grid-template-columns": ["repeat", [4, "1fr"]],
-          },
+          ".grid-container": [["grid-template-columns", "repeat(4, 1fr)"]],
         },
         "@media screen and (max-width: 480px)": {
-          ".grid-container": {
-            "grid-template-columns": "1fr",
-          },
+          ".grid-container": [["grid-template-columns", "1fr"]],
         },
-        ".grid-item": {
-          border: "1px solid #ccc",
-          padding: "10px",
-          "text-align": "center",
-        },
+        ".grid-item": [
+          ["border", "1px solid #ccc"],
+          ["padding", "10px"],
+          ["text-align", "center"],
+        ],
       });
 
       console.log(styles);
