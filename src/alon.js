@@ -1,55 +1,69 @@
 (function (window) {
   const ALON_EVENT = '__AlonEvent__';
 
-  function get(path, object, defaultValue) {
-    const keys = path.replace(/\[(\d+)\]/g, '.$1').split('.');
-    let result = object;
-
-    for (let key of keys) {
-      if (result === undefined || result === null) {
-        return defaultValue;
-      }
-      // Convert key to a number if it's a valid array index
-      const index = isNaN(Number(key)) ? key : Number(key);
-      result = result.hasOwnProperty(index) ? result[index] : undefined;
-    }
-
-    return result !== undefined ? result : defaultValue;
-  }
-
-  function signal(element, payload) {
-    element.dispatchEvent(new CustomEvent(this.ALON_EVENT, {
-      detail: payload,
-      bubbles: true,
+  function signalDown(element, payload) {
+    element.dispatchEvent(new CustomEvent(ALON_EVENT, {
+      detail: { ...payload, __alonSignalDown__: true },
+      bubbles: false,
+      cancelable: true
     }));
   }
 
-  function subscribe(element, resolver, handler) {
-    if (!element.alonHandlers) {
-      element.alonHandlers = new Map();
+  function signalUp(element, payload) {
+    element.dispatchEvent(new CustomEvent(ALON_EVENT, {
+      detail: { ...payload, __alonSignalUp__: true },
+      bubbles: true,
+      cancelable: true
+    }));
+  }
 
-      element.addEventListener(this.ALON_EVENT, (e) => {
-        for (const [resolver, handlers] of e.currentTarget.alonHandlers.entries()) {
-          const result = resolver(e.detail);
-          // Check if result is not undefined to call handlers
-          if (result !== undefined) {
-            handlers.forEach((handler) => handler(result, e));
-          }
-        }
-      });
-    }
-
-    if (element.alonHandlers.has(resolver)) {
-      element.alonHandlers.get(resolver).push(handler);
-    } else {
-      element.alonHandlers.set(resolver, [handler]);
+  function _genericEventHandler(e, handlerMap) {
+    for (const [resolver, handlers] of handlerMap.entries()) {
+      const result = resolver(e.detail);
+      if (result !== undefined) {
+        handlers.forEach((handler) => handler(result, e));
+      }
     }
   }
 
+  function capture(element, resolver, handler) {
+    if (!element.alonCaptureHandlers) {
+      element.alonCaptureHandlers = new Map();
+
+      element.addEventListener(ALON_EVENT, (e) => {
+        if (e.detail.__alonSignalDown__) return;
+        _genericEventHandler(e, h);
+      }, true);
+    }
+
+    const h = element.alonCaptureHandlers;
+    const handlers = h.get(resolver) || [];
+
+    handlers.push(handler);
+    h.set(resolver, handlers);
+  }
+
+  function absorb(element, resolver, handler) {
+    if (!element.alonAbsorbHandlers) {
+      element.alonAbsorbHandlers = new Map();
+
+      element.addEventListener(ALON_EVENT, (e) => {
+        if (e.detail.__alonSignalUp__) return;
+        _genericEventHandler(e, h);
+      }, true);
+    }
+
+    const h = element.alonAbsorbHandlers;
+    const handlers = h.get(resolver) || [];
+
+    handlers.push(handler);
+    h.set(resolver, handlers);
+  }
 
   window.Alon = {
-    get,
-    signal,
-    subscribe
+    signalDown,
+    signalUp,
+    capture,
+    absorb
   };
 })(window);

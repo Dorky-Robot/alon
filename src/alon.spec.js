@@ -1,136 +1,53 @@
-describe("get", () => {
-  it("returns the handlers that exactly matches the path", () => {
-    const val = Alon.get('person.name', { person: { name: 2 } })
-    expect(val).toEqual(2);
-  });
-
-  it("accessing a nested property using an array path", () => {
-    const val = Alon.get(
-      'user.address.city',
-      {
-        user: {
-          address: {
-            city: "Lorain",
-            state: "Ohio"
-          }
-        }
-      }
-    );
-
-    expect(val).toEqual("Lorain");
-  });
-
-  it("accessing a specific elements of an array", () => {
-    const val = Alon.get(
-      'user.addresses[1].city',
-      {
-        user: {
-          addresses: [ // Corrected from 'address' to 'addresses'
-            { city: "Lorain" },
-            { city: "Cleveland" }
-          ]
-        }
-      }
-    );
-
-    expect(val).toEqual("Cleveland");
-  });
-
-  it("returns undefined when accessing index that is out of bound", () => {
-    const val = Alon.get(
-      'user.addresses[33].city',
-      {
-        user: {
-          addresses: [ // Corrected from 'address' to 'addresses'
-            { city: "Lorain" },
-            { city: "Cleveland" }
-          ]
-        }
-      }
-    );
-
-    expect(val).toEqual(undefined);
-  });
-
-  it("attempting to access a non-existent property", () => {
-    const val = Alon.get(
-      'user.city',
-      {
-        user: {
-          addresses: [ // Corrected from 'address' to 'addresses'
-            { city: "Lorain" },
-            { city: "Cleveland" }
-          ]
-        }
-      }
-    );
-
-    expect(val).toEqual(undefined);
-  });
-
-  it("attempting to access a non-existent property with default value", () => {
-    const val = Alon.get(
-      'user.city',
-      {
-        user: {
-          addresses: [ // Corrected from 'address' to 'addresses'
-            { city: "Lorain" },
-            { city: "Cleveland" }
-          ]
-        }
-      },
-      "Not found"
-    );
-
-    expect(val).toEqual("Not found");
-  });
-});
-
-describe("subscribe", () => {
-  it("allows elements to subscribe to specific paths", () => {
-    const span = Habiscript.toElement(['span', { id: 'name' }]);
-    const container = Habiscript.toElement(
+describe("capture", () => {
+  const h = Habiscript.toElement,
+    span = h(['span', { id: 'name' }]),
+    container = h(
       ['div', { id: 'person' }, span]
     );
 
+  it("captures signalUp event", () => {
     document.body.appendChild(container);
 
     let name;
-    Alon.subscribe(
+    Alon.capture(
       container,
-      (p) => { return Alon.get('person.name', p) },
-      (r) => {
-        name = r;
-      }
+      (p) => p.person.name,
+      (r) => name = r
     );
 
-    Alon.signal(
+    let absorbed = 0;
+    Alon.absorb(
+      container,
+      (p) => p.person.name,
+      (_) => absorbed++
+    );
+
+    Alon.signalUp(
       span,
       { person: { name: 'Felix' } }
     );
 
     expect(name).toEqual('Felix');
+    expect(absorbed).toEqual(0);
   });
 
   it("calls multiple handlers for different resolvers", () => {
-    const span = Habiscript.toElement(['span', { id: 'name' }]);
-    const container = Habiscript.toElement(['div', { id: 'person' }, span]);
     document.body.appendChild(container);
 
     let firstName;
     let lastName;
-    Alon.subscribe(
+    Alon.capture(
       container,
-      (p) => Alon.get('person.firstName', p), // Resolver for the first name
+      (p) => p.person.firstName,
       (r) => { firstName = r; }
     );
-    Alon.subscribe(
+    Alon.capture(
       container,
-      (p) => Alon.get('person.lastName', p), // Resolver for the last name
+      (p) => p.person.lastName,
       (r) => { lastName = r; }
     );
 
-    Alon.signal(span, { person: { firstName: 'Felix', lastName: 'Flores' } });
+    Alon.signalUp(span, { person: { firstName: 'Felix', lastName: 'Flores' } });
 
     expect(firstName).toEqual('Felix');
     expect(lastName).toEqual('Flores');
@@ -142,13 +59,13 @@ describe("subscribe", () => {
     document.body.appendChild(container);
 
     let nameCalled = false;
-    Alon.subscribe(
+    Alon.capture(
       container,
       (p) => undefined, // Resolver fails to resolve
       (r) => { nameCalled = true; }
     );
 
-    Alon.signal(span, { person: { name: 'Felix' } });
+    Alon.signalUp(span, { person: { name: 'Felix' } });
 
     expect(nameCalled).toBe(false);
   });
@@ -159,13 +76,13 @@ describe("subscribe", () => {
     document.body.appendChild(container);
 
     let nameCalled = false;
-    Alon.subscribe(
+    Alon.capture(
       container,
       (p) => false, // Resolver returns false
       (r) => { nameCalled = true; }
     );
 
-    Alon.signal(span, { person: { name: 'Felix' } });
+    Alon.signalUp(span, { person: { name: 'Felix' } });
 
     expect(nameCalled).toBe(true);
   });
@@ -178,23 +95,23 @@ describe("subscribe", () => {
     let resolverCallCount = 0;
     const resolver = (p) => {
       resolverCallCount++;
-      return Alon.get('person.name', p);
+      return p.person.name;
     };
 
     let name1;
     let name2;
-    Alon.subscribe(
+    Alon.capture(
       container,
       resolver,
       (r) => { name1 = r; }
     );
-    Alon.subscribe(
+    Alon.capture(
       container,
       resolver,
       (r) => { name2 = r; }
     );
 
-    Alon.signal(span, { person: { name: 'Felix Flores' } });
+    Alon.signalUp(span, { person: { name: 'Felix Flores' } });
 
     // Check that the resolver was called only once
     expect(resolverCallCount).toEqual(1);
@@ -215,9 +132,9 @@ describe("subscribe", () => {
     let outerHandlerCalled = false;
 
     // Subscribe handler for the inner element and stop propagation
-    Alon.subscribe(
+    Alon.capture(
       inner,
-      (p) => Alon.get('person.name', p),
+      (p) => p.person.name,
       (r, e) => {
         innerHandlerCalled = true;
         e.stopPropagation(); // Stop the event from bubbling up
@@ -225,7 +142,7 @@ describe("subscribe", () => {
     );
 
     // Subscribe handler for the outer element
-    Alon.subscribe(
+    Alon.capture(
       outer,
       (p) => Alon.get('person.name', p),
       (r, e) => {
@@ -233,7 +150,7 @@ describe("subscribe", () => {
       }
     );
 
-    Alon.signal(span, { person: { name: 'Felix Flores' } });
+    Alon.signalUp(span, { person: { name: 'Felix Flores' } });
 
     expect(innerHandlerCalled).toBe(true);
     expect(outerHandlerCalled).toBe(false);

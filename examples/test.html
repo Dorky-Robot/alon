@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Synthetic Event Example</title>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // Function to dispatch a synthetic event
+        function dispatchSyntheticEvent(target, eventType) {
+          let event = new CustomEvent(eventType, {
+            bubbles: true, // Will trigger listeners in the bubble phase
+            cancelable: true,
+            detail: { text: "Example detail text" },
+          });
+          target.dispatchEvent(event);
+        }
+
+        // Capture phase listener
+        document.getElementById("container").addEventListener(
+          "customEvent",
+          function (event) {
+            console.log(
+              "Capture phase: Container heard a custom event with detail:",
+              event.detail.text
+            );
+          },
+          true
+        ); // Setting the third parameter to `true` makes it a capture phase listener
+
+        // Bubble phase listener
+        document.getElementById("container").addEventListener(
+          "customEvent",
+          function (event) {
+            console.log(
+              "Bubble phase: Container heard a custom event with detail:",
+              event.detail.text
+            );
+          },
+          false
+        ); // Setting the third parameter to `true` makes it a capture phase listener
+
+        // Bubble phase listener
+        document
+          .getElementById("inner")
+          .addEventListener("customEvent", function (event) {
+            console.log(
+              "Bubble phase: Inner div heard a custom event with detail:",
+              event.detail.text
+            );
+          });
+
+        // Button event listener to dispatch the event
+        document
+          .getElementById("dispatchButton")
+          .addEventListener("click", function () {
+            dispatchSyntheticEvent(
+              document.getElementById("inner"),
+              "customEvent"
+            );
+          });
+      });
+    </script>
+  </head>
+  <body>
+    <div id="container" style="padding: 20px; border: 2px solid blue">
+      Container (listens during capture phase)
+      <div id="inner" style="padding: 20px; border: 2px solid red">
+        Inner Div (listens during bubble phase)
+      </div>
+    </div>
+    <button id="dispatchButton">Dispatch Custom Event</button>
+  </body>
+</html>
