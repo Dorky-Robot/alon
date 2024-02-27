@@ -2,57 +2,6 @@
   const Stuff = {};
   const ALON_EVENT = '__AlonEvent__';
 
-  function get({ path, candidates }) {
-    if (typeof path !== 'string' || !path.trim() || typeof candidates !== 'object' || candidates === null) {
-      return [];
-    }
-
-    // Optimization for single-level paths
-    if (!path.includes('.')) {
-      return Reflect.has(candidates, path) ? [candidates[path]].filter(Boolean) : [];
-    }
-
-    const keys = path.split('.').filter(Boolean);
-    let current = candidates;
-    for (const key of keys) {
-      if (!Reflect.has(current, key)) return [];
-      current = current[key];
-      if (typeof current !== 'object' || current === null) break;
-    }
-
-    return Array.isArray(current) ? current : [current].filter(Boolean);
-  }
-
-  function extractLeafNodes(obj) {
-    // Early return for top-level empty object
-    if (Object.keys(obj).length === 0 && obj.constructor === Object) {
-      return [];
-    }
-
-    let leaves = [];
-
-    // Simplifies the object check, directly excluding null values
-    const isObject = (value) => typeof value === 'object' && value !== null;
-
-    function traverse(node) {
-      // Checks if the node is an array or a primitive (including null and undefined)
-      if (Array.isArray(node) || !isObject(node)) {
-        leaves.push(node);
-      } else {
-        // For non-empty objects, iterate over values recursively
-        if (Object.keys(node).length === 0) {
-          // Directly add empty objects encountered during traversal
-          leaves.push(node);
-        } else {
-          Object.values(node).forEach(traverse);
-        }
-      }
-    }
-
-    traverse(obj);
-    return leaves;
-  }
-
   function signal({ element, path, payload }) {
     const mergedDetail = { payload, timestamp: new Date().getTime(), path };
 
@@ -62,51 +11,70 @@
     }));
   }
 
+  function _registerSubscriber({ pathSegments, handlers, handler }) {
+    const segment = pathSegments.shift();
+
+    if (pathSegments.length > 0) {
+      handlers[segment] = handlers[segment] || {};
+
+      _registerSubscriber({
+        pathSegments, handlers: handlers[segment], handler
+      });
+    } else {
+      if (segment === '*') {
+        handlers[segment] = handlers[segment] || [];
+        handlers[segment].push(handler);
+      } else {
+        handlers[segment] = handlers[segment] || {};
+        handlers[segment]['*'] = handlers[segment]['*'] || []
+        handlers[segment]['*'].push(handler);
+      }
+
+    }
+  };
+
+  function _getHandlers({ pathSegments, candidates }) {
+    const segment = pathSegments.shift();
+
+    let handlers = [];
+
+    if (candidates[segment] && candidates[segment]['*']) {
+      handlers.push(...candidates[segment]['*']);
+    }
+
+    if (pathSegments.length > 0 && candidates[segment]) {
+      handlers.push(..._getHandlers({
+        pathSegments,
+        candidates: candidates[segment]
+      }));
+    }
+
+    return handlers;
+  }
+
   function subscribe({ element, path, handler }) {
     element.addEventListener(this.ALON_EVENT, (e) => {
-      // const candidates = this.get({
-      //   candidates: e.currentTarget.alonHandlers,
-      //   path: e.detail.path
-      // });
-
-
-      const pathSegments = e.detail.path.split('.');
-      let handlers = [];
-      function getHandlers(pathSegments, obj) {
-        const segment = pathSegments.shift();
-        if (obj[segment] && obj[segment]['*']) handlers.push(...obj[segment]['*']);
-
-        if (pathSegments.length > 0) {
-          getHandlers(pathSegments, obj[segment]);
-        }
-      }
-      getHandlers(pathSegments, e.currentTarget.alonHandlers);
+      const handlers = _getHandlers({
+        pathSegments: e.detail.path.split('.'),
+        candidates: e.currentTarget.alonHandlers
+      });
 
       handlers.map(f => f(e.detail.payload))
     });
 
     element.alonHandlers = element.alonHandlers || {}; // Add data property to elem object
-    sub(path.split('.'), element.alonHandlers);
+    _registerSubscriber({
+      pathSegments: path.split('.'),
+      handlers: element.alonHandlers,
+      handler
+    });
 
-    function sub(segments, obj) {
-      const segment = segments.shift();
-      if (segments.length === 0) {
-        obj[segment] = obj[segment] || {};
-        obj[segment]['*'] = obj[segment]['*'] || []
-
-        obj[segment]['*'].push(handler);
-      } else {
-        obj[segment] = obj[segment] || {};
-        sub(segments, obj[segment]);
-      }
-    };
   }
 
   window.Alon = {
-    get,
-    extractLeafNodes,
     signal,
-    subscribe
+    subscribe,
+    _registerSubscriber
   };
 })(window);
 
