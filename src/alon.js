@@ -11,14 +11,24 @@
     }));
   }
 
+  /**
+   * Internal function to register a handler based on a series of path segments.
+   * This function constructs or traverses a nested structure of handlers, registering
+   * the provided handler function at the level indicated by the pathSegments array.
+   * It's designed for internal use within a larger routing or event handling system
+   * where paths need to be dynamically registered and associated with specific handlers.
+   * 
+   * Note: This function mutates the `handlers` object in place for efficiency.
+   * 
+   */
   function _registerSubscriber({ pathSegments, handlers, handler }) {
-    const segment = pathSegments.shift();
+    const [segment, ...rest] = pathSegments;
 
-    if (pathSegments.length > 0) {
+    if (rest.length > 0) {
       handlers[segment] = handlers[segment] || {};
 
       _registerSubscriber({
-        pathSegments, handlers: handlers[segment], handler
+        pathSegments: rest, handlers: handlers[segment], handler
       });
     } else {
       if (segment === '*') {
@@ -29,12 +39,11 @@
         handlers[segment]['*'] = handlers[segment]['*'] || []
         handlers[segment]['*'].push(handler);
       }
-
     }
   };
 
   function _getHandlers({ pathSegments, candidates }) {
-    const segment = pathSegments.shift();
+    const [segment, ...rest] = pathSegments;
 
     let handlers = [];
 
@@ -42,9 +51,9 @@
       handlers.push(...candidates[segment]['*']);
     }
 
-    if (pathSegments.length > 0 && candidates[segment]) {
+    if (rest.length > 0 && candidates[segment]) {
       handlers.push(..._getHandlers({
-        pathSegments,
+        pathSegments: rest,
         candidates: candidates[segment]
       }));
     }
