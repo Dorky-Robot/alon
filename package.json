@@ -1,19 +1,12 @@
 {
   "name": "pure.ui",
   "version": "0.0.1",
-  "description": "A purely Functional ui library.",
-  "main": "pure.ui.js",
-  "scripts": {
-    "test": "jest",
-    "habiscript": "rm -rf ./src/habiscript/* && mkdir -p ./src/habiscript/ && cp ./node_modules/habiscript/dist/*.* ./src/habiscript/"
-  },
+  "description": "Receptor based DOM event subscription",
+  "main": "alon.js",
   "author": "Felix Flores",
   "license": "ISC",
-  "dependencies": {
-    "habiscript": "^1.2.0",
-    "katha.js": "^0.15.0"
-  },
   "devDependencies": {
+    "habiscript": "^1.4.1",
     "jasmine": "^5.1.0",
     "jasmine-browser-runner": "^2.3.0",
     "jasmine-core": "^5.1.2",
