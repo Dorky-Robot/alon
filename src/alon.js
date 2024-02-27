@@ -1,91 +1,91 @@
-const ALON_EVENT = '__AlonEvent__';
+(function (window) {
+  const ALON_EVENT = '__AlonEvent__';
 
-function get({ path, candidates }) {
-  if (typeof path !== 'string' || !path.trim() || typeof candidates !== 'object' || candidates === null) {
-    return [];
+  function get({ path, candidates }) {
+    if (typeof path !== 'string' || !path.trim() || typeof candidates !== 'object' || candidates === null) {
+      return [];
+    }
+
+    // Optimization for single-level paths
+    if (!path.includes('.')) {
+      return Reflect.has(candidates, path) ? [candidates[path]].filter(Boolean) : [];
+    }
+
+    const keys = path.split('.').filter(Boolean);
+    let current = candidates;
+    for (const key of keys) {
+      if (!Reflect.has(current, key)) return [];
+      current = current[key];
+      if (typeof current !== 'object' || current === null) break;
+    }
+
+    return Array.isArray(current) ? current : [current].filter(Boolean);
   }
 
-  // Optimization for single-level paths
-  if (!path.includes('.')) {
-    return Reflect.has(candidates, path) ? [candidates[path]].filter(Boolean) : [];
-  }
+  function extractLeafNodes(obj) {
+    // Early return for top-level empty object
+    if (Object.keys(obj).length === 0 && obj.constructor === Object) {
+      return [];
+    }
 
-  const keys = path.split('.').filter(Boolean);
-  let current = candidates;
-  for (const key of keys) {
-    if (!Reflect.has(current, key)) return [];
-    current = current[key];
-    if (typeof current !== 'object' || current === null) break;
-  }
+    let leaves = [];
 
-  return Array.isArray(current) ? current : [current].filter(Boolean);
-}
+    // Simplifies the object check, directly excluding null values
+    const isObject = (value) => typeof value === 'object' && value !== null;
 
-function extractLeafNodes(obj) {
-  // Early return for top-level empty object
-  if (Object.keys(obj).length === 0 && obj.constructor === Object) {
-    return [];
-  }
-
-  let leaves = [];
-
-  // Simplifies the object check, directly excluding null values
-  const isObject = (value) => typeof value === 'object' && value !== null;
-
-  function traverse(node) {
-    // Checks if the node is an array or a primitive (including null and undefined)
-    if (Array.isArray(node) || !isObject(node)) {
-      leaves.push(node);
-    } else {
-      // For non-empty objects, iterate over values recursively
-      if (Object.keys(node).length === 0) {
-        // Directly add empty objects encountered during traversal
+    function traverse(node) {
+      // Checks if the node is an array or a primitive (including null and undefined)
+      if (Array.isArray(node) || !isObject(node)) {
         leaves.push(node);
       } else {
-        Object.values(node).forEach(traverse);
+        // For non-empty objects, iterate over values recursively
+        if (Object.keys(node).length === 0) {
+          // Directly add empty objects encountered during traversal
+          leaves.push(node);
+        } else {
+          Object.values(node).forEach(traverse);
+        }
       }
     }
+
+    traverse(obj);
+    return leaves;
   }
 
-  traverse(obj);
-  return leaves;
-}
+  function signal({ element, path, payload }) {
+    const mergedDetail = { payload, timestamp: new Date().getTime(), path };
 
-function signal({ element, path, payload }) {
-  const mergedDetail = { payload, timestamp: new Date().getTime(), path };
+    element.dispatchEvent(new CustomEvent(this.ALON_EVENT, {
+      detail: mergedDetail,
+      bubbles: true,
+    }));
+  }
 
-  element.dispatchEvent(new CustomEvent(this.ALON_EVENT, {
-    detail: mergedDetail,
-    bubbles: true,
-  }));
-}
+  function subscribe(elem, path, handler) {
+    elem.addListener(this.ALON_EVENT, alonHandler);
+    elem.alonHandlers = elem.alonHandlers || {}; // Add data property to elem object
 
-function subscribe(elem, path, handler) {
-  elem.addListener(this.ALON_EVENT, alonHandler);
-  elem.alonHandlers = elem.alonHandlers || {}; // Add data property to elem object
+    sub(path.split('.'), elem.alonHandlers);
 
-  sub(path.split('.'), elem.alonHandlers);
+    function sub(segments, obj) {
+      const segment = segments.shift();
+      if (segments.length === 0) {
+        obj[segment] = obj[segment] || []
+        obj[segment].push(handler);
+      } else {
+        obj[segment] = obj[segment] || {};
+        sub(segments, obj[segment]);
+      }
+    };
+  }
 
-  function sub(segments, obj) {
-    const segment = segments.shift();
-    if (segments.length === 0) {
-      obj[segment] = obj[segment] || []
-      obj[segment].push(handler);
-    } else {
-      obj[segment] = obj[segment] || {};
-      sub(segments, obj[segment]);
-    }
+  window.Alon = {
+    get,
+    extractLeafNodes,
+    signal,
+    subscribe
   };
-}
-
-module.exports = {
-  get,
-  extractLeafNodes,
-  subscribe,
-  ALON_EVENT
-}
-
-
+})(window);
 
 
 // Alon.dispatch = function ({ path, payload }) {

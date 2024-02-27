@@ -1,31 +1,18 @@
-const { JSDOM } = require("jsdom");
-const { get, subscribe, extractLeafNodes } = require("./alon.js");
-
-describe("subscribe", () => {
-  beforeAll(() => {
-    // Setup JSDOM
-    const jsdom = new JSDOM("");
-    global.document = jsdom.window.document;
-    global.Node = jsdom.window.Node;
-    document = jsdom.window.document;
-  });
-})
-
 describe("get", () => {
   it("returns the handlers that exactly matches the path", () => {
     const handler = () => { };
-    const handlers = get({
+    const handlers = Alon.get({
       path: 'person.name',
       candidates: { person: { name: handler } }
     });
 
-    expect(handlers).toStrictEqual([handler]);
+    expect(handlers).toEqual([handler]);
   });
 
 
   it("accessing a nested property using an array path", () => {
     const handler = () => console.log('Anytown');
-    const handlers = get({
+    const handlers = Alon.get({
       path: 'user.address.city',
       candidates: {
         user: {
@@ -37,11 +24,11 @@ describe("get", () => {
       payload: 1
     });
 
-    expect(handlers).toStrictEqual([handler]);
+    expect(handlers).toEqual([handler]);
   });
 
   it("attempting to access a non-existent property", () => {
-    const handlers = get({
+    const handlers = Alon.get({
       path: 'user.age',
       candidates: {
         user: {
@@ -51,11 +38,11 @@ describe("get", () => {
       payload: 1
     });
 
-    expect(handlers).toStrictEqual([]);
+    expect(handlers).toEqual([]);
   });
 
   it("using a non-existent path", () => {
-    const handlers = get({
+    const handlers = Alon.get({
       path: 'user.history[0].details',
       candidates: {
         user: {
@@ -70,12 +57,12 @@ describe("get", () => {
     });
 
     // Assuming getHandlers is designed to not handle array indices in paths directly
-    expect(handlers).toStrictEqual([]);
+    expect(handlers).toEqual([]);
   });
 
   describe('get', () => {
     it("using a non-existent path in a deeply nested object", () => {
-      const result = get({
+      const result = Alon.get({
         path: 'user.details.age',
         candidates: {
           user: {
@@ -85,11 +72,11 @@ describe("get", () => {
         },
         payload: 1
       });
-      expect(result).toStrictEqual([]);
+      expect(result).toEqual([]);
     });
 
     it("using a non-existent array index", () => {
-      const result = get({
+      const result = Alon.get({
         path: 'user.history[5]',
         candidates: {
           user: {
@@ -101,11 +88,11 @@ describe("get", () => {
         },
         payload: 1
       });
-      expect(result).toStrictEqual([]);
+      expect(result).toEqual([]);
     });
 
     it("using a non-existent path with mixed types", () => {
-      const result = get({
+      const result = Alon.get({
         path: 'user.settings.notifications.email',
         candidates: {
           user: {
@@ -118,11 +105,11 @@ describe("get", () => {
         },
         payload: 1
       });
-      expect(result).toStrictEqual([]);
+      expect(result).toEqual([]);
     });
 
     it("using a path that leads to an undefined value", () => {
-      const result = get({
+      const result = Alon.get({
         path: 'user.preferences.theme',
         candidates: {
           user: {
@@ -131,11 +118,11 @@ describe("get", () => {
         },
         payload: 1
       });
-      expect(result).toStrictEqual([]);
+      expect(result).toEqual([]);
     });
 
     it("using a completely irrelevant path", () => {
-      const result = get({
+      const result = Alon.get({
         path: 'nonexistent.property.deeply.nested',
         candidates: {
           user: {
@@ -146,12 +133,12 @@ describe("get", () => {
         },
         payload: 1
       });
-      expect(result).toStrictEqual([]);
+      expect(result).toEqual([]);
     });
   });
 });
 
-describe('extractLeafNodes', () => {
+describe('Alon.extractLeafNodes', () => {
   it('extracts leaf nodes from a nested object', () => {
     const obj = {
       a: 1,
@@ -164,7 +151,7 @@ describe('extractLeafNodes', () => {
       },
       g: 5,
     };
-    expect(extractLeafNodes(obj)).toEqual([1, 2, 3, 4, 5]);
+    expect(Alon.extractLeafNodes(obj)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('handles objects with array properties by treating array entries as leaf nodes', () => {
@@ -175,16 +162,16 @@ describe('extractLeafNodes', () => {
         d: 5,
       },
     };
-    expect(extractLeafNodes(obj)).toEqual([[1, 2], [3, 4], 5]);
+    expect(Alon.extractLeafNodes(obj)).toEqual([[1, 2], [3, 4], 5]);
   });
 
   it('returns an empty array for an empty object', () => {
-    expect(extractLeafNodes({})).toEqual([]);
+    expect(Alon.extractLeafNodes({})).toEqual([]);
   });
 
   it('returns the same object if it is already a leaf node', () => {
-    expect(extractLeafNodes(10)).toEqual([10]);
-    expect(extractLeafNodes("string")).toEqual(["string"]);
+    expect(Alon.extractLeafNodes(10)).toEqual([10]);
+    expect(Alon.extractLeafNodes("string")).toEqual(["string"]);
   });
 
   it('handles objects with nested empty objects', () => {
@@ -195,7 +182,7 @@ describe('extractLeafNodes', () => {
       },
       d: 1,
     };
-    expect(extractLeafNodes(obj)).toEqual([{}, {}, 1]);
+    expect(Alon.extractLeafNodes(obj)).toEqual([{}, {}, 1]);
   });
 
   it('ignores null and undefined values', () => {
@@ -207,6 +194,6 @@ describe('extractLeafNodes', () => {
         e: 2,
       },
     };
-    expect(extractLeafNodes(obj)).toEqual([null, undefined, null, 2]);
+    expect(Alon.extractLeafNodes(obj)).toEqual([null, undefined, null, 2]);
   });
 });
