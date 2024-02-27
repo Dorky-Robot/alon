@@ -4,8 +4,7 @@
   "description": "A purely Functional ui library.",
   "main": "pure.ui.js",
   "scripts": {
-    "jest": "jest",
-    "jasmine": "jasmine-browser-runner runSpecs",
+    "test": "jest",
     "habiscript": "rm -rf ./src/habiscript/* && mkdir -p ./src/habiscript/ && cp ./node_modules/habiscript/dist/*.* ./src/habiscript/"
   },
   "author": "Felix Flores",

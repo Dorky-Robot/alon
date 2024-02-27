@@ -1,4 +1,5 @@
 (function (window) {
+  const Stuff = {};
   const ALON_EVENT = '__AlonEvent__';
 
   function get({ path, candidates }) {
@@ -61,17 +62,39 @@
     }));
   }
 
-  function subscribe(elem, path, handler) {
-    elem.addListener(this.ALON_EVENT, alonHandler);
-    elem.alonHandlers = elem.alonHandlers || {}; // Add data property to elem object
+  function subscribe({ element, path, handler }) {
+    element.addEventListener(this.ALON_EVENT, (e) => {
+      // const candidates = this.get({
+      //   candidates: e.currentTarget.alonHandlers,
+      //   path: e.detail.path
+      // });
 
-    sub(path.split('.'), elem.alonHandlers);
+
+      const pathSegments = e.detail.path.split('.');
+      let handlers = [];
+      function getHandlers(pathSegments, obj) {
+        const segment = pathSegments.shift();
+        if (obj[segment] && obj[segment]['*']) handlers.push(...obj[segment]['*']);
+
+        if (pathSegments.length > 0) {
+          getHandlers(pathSegments, obj[segment]);
+        }
+      }
+      getHandlers(pathSegments, e.currentTarget.alonHandlers);
+
+      handlers.map(f => f(e.detail.payload))
+    });
+
+    element.alonHandlers = element.alonHandlers || {}; // Add data property to elem object
+    sub(path.split('.'), element.alonHandlers);
 
     function sub(segments, obj) {
       const segment = segments.shift();
       if (segments.length === 0) {
-        obj[segment] = obj[segment] || []
-        obj[segment].push(handler);
+        obj[segment] = obj[segment] || {};
+        obj[segment]['*'] = obj[segment]['*'] || []
+
+        obj[segment]['*'].push(handler);
       } else {
         obj[segment] = obj[segment] || {};
         sub(segments, obj[segment]);
