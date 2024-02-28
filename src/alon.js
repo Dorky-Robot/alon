@@ -17,10 +17,31 @@
     }));
   }
 
+  function gapUp(element, matcher, transformer) {
+    capture(element, matcher, function (payload, event) {
+      signalUp(
+        element,
+        transformer ? transformer(payload) : payload,
+      );
+    });
+  }
+
+  function gapDown(element, matcher, transformer) {
+    absorb(element, matcher, function (payload) {
+      signalUp(
+        element,
+        transformer ? transformer(payload) : payload);
+    });
+  }
+
   function _genericEventHandler(e, handlerMap) {
+    e.stopPropagation();
+
     for (const [resolver, handlers] of handlerMap.entries()) {
+      console.log(e.currentTarget, resolver, handlers)
       const result = resolver(e.detail);
       if (result !== undefined) {
+        console.log('resolved!')
         handlers.forEach((handler) => handler(result, e));
       }
     }
@@ -64,6 +85,8 @@
     signalDown,
     signalUp,
     capture,
-    absorb
+    gapDown,
+    absorb,
+    gapUp
   };
 })(window);

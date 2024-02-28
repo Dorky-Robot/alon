@@ -5,7 +5,7 @@ describe("capture", () => {
       ['div', { id: 'person' }, span]
     );
 
-  it("captures signalUp event", () => {
+  it("captures signalUp event and should not trigger absorption", () => {
     document.body.appendChild(container);
 
     let name;
@@ -54,8 +54,6 @@ describe("capture", () => {
   });
 
   it("does not call handlers when the resolver returns undefined", () => {
-    const span = Habiscript.toElement(['span', { id: 'name' }]);
-    const container = Habiscript.toElement(['div', { id: 'person' }, span]);
     document.body.appendChild(container);
 
     let nameCalled = false;
@@ -71,8 +69,6 @@ describe("capture", () => {
   });
 
   it("does call handlers when the resolver returns false", () => {
-    const span = Habiscript.toElement(['span', { id: 'name' }]);
-    const container = Habiscript.toElement(['div', { id: 'person' }, span]);
     document.body.appendChild(container);
 
     let nameCalled = false;
@@ -88,8 +84,6 @@ describe("capture", () => {
   });
 
   it("calls the same resolver only once but multiple handlers for that resolver", () => {
-    const span = Habiscript.toElement(['span', { id: 'name' }]);
-    const container = Habiscript.toElement(['div', { id: 'person' }, span]);
     document.body.appendChild(container);
 
     let resolverCallCount = 0;
@@ -121,10 +115,10 @@ describe("capture", () => {
     expect(name2).toEqual('Felix Flores');
   });
 
-  it("does not propagate the event to the outer element when stopPropagation is called", () => {
-    const span = Habiscript.toElement(['span', { id: 'name' }]);
-    const inner = Habiscript.toElement(['div', { id: 'person' }, span]);
-    const outer = Habiscript.toElement(['div', inner]);
+  it("does not propagate the event to the outer element if the capture resolves", () => {
+    const span = h(['span', { id: 'name' }]);
+    const inner = h(['div', { id: 'person' }, span]);
+    const outer = h(['div', inner]);
 
     document.body.appendChild(outer);
 
@@ -137,14 +131,13 @@ describe("capture", () => {
       (p) => p.person.name,
       (r, e) => {
         innerHandlerCalled = true;
-        e.stopPropagation(); // Stop the event from bubbling up
       }
     );
 
     // Subscribe handler for the outer element
     Alon.capture(
       outer,
-      (p) => Alon.get('person.name', p),
+      (p) => p.person.name,
       (r, e) => {
         outerHandlerCalled = true;
       }
@@ -153,6 +146,39 @@ describe("capture", () => {
     Alon.signalUp(span, { person: { name: 'Felix Flores' } });
 
     expect(innerHandlerCalled).toBe(true);
+    expect(outerHandlerCalled).toBe(false);
+  });
+
+  it("does not propagate the event to the outer element if the capture does not resolves", () => {
+    const span = h(['span', { id: 'name' }]);
+    const inner = h(['div', { id: 'person' }, span]);
+    const outer = h(['div', inner]);
+
+    document.body.appendChild(outer);
+
+    // Subscribe handler for the inner element and stop propagation
+    let innerHandlerCalled = false;
+    Alon.capture(
+      inner,
+      (p) => p.person.random,
+      (r, e) => {
+        innerHandlerCalled = true;
+      }
+    );
+
+    // Subscribe handler for the outer element
+    let outerHandlerCalled = false;
+    Alon.capture(
+      outer,
+      (p) => p.person.name,
+      (r, e) => {
+        console.log('outer', e, r)
+        outerHandlerCalled = true;
+      }
+    );
+
+    Alon.signalUp(span, { person: { name: 'Felix Flores' } });
+    expect(innerHandlerCalled).toBe(false);
     expect(outerHandlerCalled).toBe(false);
   });
 })
