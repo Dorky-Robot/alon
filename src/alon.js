@@ -38,10 +38,8 @@
     e.stopPropagation();
 
     for (const [resolver, handlers] of handlerMap.entries()) {
-      console.log(e.currentTarget, resolver, handlers)
       const result = resolver(e.detail);
       if (result !== undefined) {
-        console.log('resolved!')
         handlers.forEach((handler) => handler(result, e));
       }
     }
@@ -81,12 +79,31 @@
     h.set(resolver, handlers);
   }
 
+  function intercept(element, eventType, callback) {
+    const host = element.shadowRoot.host;
+
+    element.addEventListener(eventType, (event) => {
+      if (event.defaultPrevented) event.preventDefault();
+
+      // Create a higher-order function that includes the Alon methods
+      const enhancedCallback = (e) => {
+        callback(e, {
+          signalUp: (payload) => signalUp(host, payload),
+          signalDown: (payload) => signalDown(host, payload)
+        });
+      };
+
+      enhancedCallback(event);
+    });
+  }
+
   window.Alon = {
     signalDown,
     signalUp,
     capture,
     gapDown,
     absorb,
-    gapUp
+    gapUp,
+    intercept
   };
 })(window);

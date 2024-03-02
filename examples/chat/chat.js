@@ -28,24 +28,19 @@ customElements.define('user-input',
     }
 
     connectedCallback() {
-      this.form.addEventListener('submit', (e) => {
-        const t = e.currentTarget;
-        Alon.signal(t, { userInput: { value: t.value } });
+      Alon.intercept(this.form, 'submit', (e, { signalUp }) => {
+        e.currentTarget.reset();
 
-        e.preventDefault();
-        t.reset();
+        signalUp({ userInput: { value: this.value } });
       });
     }
   }
 )
 
-const messages = document.querySelector('messages');
-
-Alon.subscribe(
-  messages,
+Alon.capture(
+  document.querySelector('chat'),
   (payload) => {
-    console.log(payload.userInput.value)
     return payload.userInput.value;
   },
-  (message) => messages.appendChild(h(['p', message]))
+  (message) => document.querySelector('messages').appendChild(h(['p', message]))
 );
