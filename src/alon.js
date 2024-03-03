@@ -79,10 +79,8 @@
     h.set(resolver, handlers);
   }
 
-  function intercept(element, eventType, callback) {
-    const host = element.shadowRoot.host;
-
-    element.addEventListener(eventType, (event) => {
+  function intercept(host, targetElement, eventType, callback) {
+    targetElement.addEventListener(eventType, (event) => {
       if (event.defaultPrevented) event.preventDefault();
 
       // Create a higher-order function that includes the Alon methods

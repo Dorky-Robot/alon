@@ -1,7 +1,7 @@
 const h = Habiscript.toElement;
 
 customElements.define('user-input',
-  class extends HTMLElement {
+  class extends AlonElement {
     constructor() {
       super();
 
@@ -30,7 +30,6 @@ customElements.define('user-input',
     connectedCallback() {
       Alon.intercept(this.form, 'submit', (e, { signalUp }) => {
         e.currentTarget.reset();
-
         signalUp({ userInput: { value: this.value } });
       });
     }
