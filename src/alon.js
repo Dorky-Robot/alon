@@ -81,17 +81,8 @@
 
   function intercept(host, targetElement, eventType, callback) {
     targetElement.addEventListener(eventType, (event) => {
-      if (event.defaultPrevented) event.preventDefault();
-
-      // Create a higher-order function that includes the Alon methods
-      const enhancedCallback = (e) => {
-        callback(e, {
-          signalUp: (payload) => signalUp(host, payload),
-          signalDown: (payload) => signalDown(host, payload)
-        });
-      };
-
-      enhancedCallback(event);
+      if (event.preventDefault) event.preventDefault();
+      callback(event);
     });
   }
 

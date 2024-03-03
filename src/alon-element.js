@@ -3,13 +3,10 @@
 class AlonElement extends HTMLElement {
   constructor() {
     super();
-    // Any setup needed for your custom element
   }
 
-  // Use Alon methods directly
-  intercept(element, eventType, callback) {
-    window.Alon.intercept(host, targetElement, eventType, (e) => {
-      // You can modify this callback as necessary
+  intercept(targetElement, eventType, callback) {
+    window.Alon.intercept(this, targetElement, eventType, (e) => {
       callback(e);
     });
   }

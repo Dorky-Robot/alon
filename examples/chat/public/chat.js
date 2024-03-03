@@ -28,9 +28,9 @@ customElements.define('user-input',
     }
 
     connectedCallback() {
-      Alon.intercept(this.form, 'submit', (e, { signalUp }) => {
+      this.intercept(this.form, 'submit', (e) => {
+        this.signalUp({ userInput: { value: this.value } });
         e.currentTarget.reset();
-        signalUp({ userInput: { value: this.value } });
       });
     }
   }
@@ -41,5 +41,7 @@ Alon.capture(
   (payload) => {
     return payload.userInput.value;
   },
-  (message) => document.querySelector('messages').appendChild(h(['p', message]))
+  (message) => {
+    document.querySelector('messages').appendChild(h(['p', message]))
+  }
 );
