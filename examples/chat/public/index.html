@@ -5,10 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chatbox Example</title>
     <script type="text/javascript" src="alon.js"></script>
-    <script src="https://unpkg.com/habiscript"></script>
+    <script src="habiscript.bundle.js"></script>
+    <style>
+      user-input {
+        /* Define custom properties for the user-input component */
+        --primary-color: #4caf50; /* A nice shade of green */
+        --focus-color: #8bc34a; /* A lighter shade for the focus state */
+        --base-padding: 0.5rem; /* Adjust padding if necessary */
+        --border-radius: 0.25rem; /* Adjust border-radius if necessary */
+      }
+    </style>
   </head>
   <body>
-    <script type="text/javascript" src="alon-element.js"></script>
+    <script type="text/javascript" src="alon-element.js" defer></script>
+    <script type="text/javascript" src="user-input.js" defer></script>
     <script type="text/javascript" src="chat.js" defer></script>
     <chat>
       <messages></messages>

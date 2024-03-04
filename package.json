@@ -6,10 +6,10 @@
   "author": "Felix Flores",
   "license": "ISC",
   "scripts": {
-    "build": "rollup -c"
+    "build": "rollup -c",
+    "habiscript": "rm -rf ./src/habiscript/* && mkdir -p ./src/habiscript/ && cp ./node_modules/habiscript/dist/*.* ./src/habiscript/"
   },
   "devDependencies": {
-    "habiscript": "^1.4.1",
     "jasmine": "^5.1.0",
     "jasmine-browser-runner": "^2.3.0",
     "jasmine-core": "^5.1.2",
@@ -17,5 +17,8 @@
     "jsdom": "^24.0.0",
     "rollup": "^2.79.1",
     "rollup-plugin-terser": "^7.0.2"
+  },
+  "dependencies": {
+    "habiscript": "^1.4.1"
   }
 }
