@@ -19,8 +19,6 @@ class AlonElement extends HTMLElement {
   signalDown(payload) {
     window.Alon.signalDown(this, payload);
   }
-
-  // ...other methods if needed
 }
 
 // Define the custom element
