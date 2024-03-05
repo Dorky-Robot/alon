@@ -19,6 +19,14 @@ class AlonElement extends HTMLElement {
   signalDown(payload) {
     window.Alon.signalDown(this, payload);
   }
+
+  bubbling(resolver, handler) {
+    window.Alon.bubbling(this, resolver, handler);
+  }
+
+  capture(resolver, handler) {
+    window.Alon.capture(this, resolver, handler);
+  }
 }
 
 // Define the custom element

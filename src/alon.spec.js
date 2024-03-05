@@ -1,22 +1,22 @@
-describe("capture", () => {
+describe("bubbling", () => {
   const h = Habiscript.toElement,
     span = h(['span', { id: 'name' }]),
     container = h(
       ['div', { id: 'person' }, span]
     );
 
-  it("captures signalUp event and should not trigger absorption", () => {
+  it("catches bubbling events from signalUp event and should be seen in the capture", () => {
     document.body.appendChild(container);
 
     let name;
-    Alon.capture(
+    Alon.bubbling(
       container,
       (p) => p.person.name,
       (r) => name = r
     );
 
     let absorbed = 0;
-    Alon.absorb(
+    Alon.capture(
       container,
       (p) => p.person.name,
       (_) => absorbed++
@@ -36,12 +36,12 @@ describe("capture", () => {
 
     let firstName;
     let lastName;
-    Alon.capture(
+    Alon.bubbling(
       container,
       (p) => p.person.firstName,
       (r) => { firstName = r; }
     );
-    Alon.capture(
+    Alon.bubbling(
       container,
       (p) => p.person.lastName,
       (r) => { lastName = r; }
@@ -57,7 +57,7 @@ describe("capture", () => {
     document.body.appendChild(container);
 
     let nameCalled = false;
-    Alon.capture(
+    Alon.bubbling(
       container,
       (p) => undefined, // Resolver fails to resolve
       (r) => { nameCalled = true; }
@@ -72,7 +72,7 @@ describe("capture", () => {
     document.body.appendChild(container);
 
     let nameCalled = false;
-    Alon.capture(
+    Alon.bubbling(
       container,
       (p) => false, // Resolver returns false
       (r) => { nameCalled = true; }
@@ -94,12 +94,12 @@ describe("capture", () => {
 
     let name1;
     let name2;
-    Alon.capture(
+    Alon.bubbling(
       container,
       resolver,
       (r) => { name1 = r; }
     );
-    Alon.capture(
+    Alon.bubbling(
       container,
       resolver,
       (r) => { name2 = r; }
@@ -126,7 +126,7 @@ describe("capture", () => {
     let outerHandlerCalled = false;
 
     // Subscribe handler for the inner element and stop propagation
-    Alon.capture(
+    Alon.bubbling(
       inner,
       (p) => p.person.name,
       (r, e) => {
@@ -135,7 +135,7 @@ describe("capture", () => {
     );
 
     // Subscribe handler for the outer element
-    Alon.capture(
+    Alon.bubbling(
       outer,
       (p) => p.person.name,
       (r, e) => {
@@ -149,7 +149,7 @@ describe("capture", () => {
     expect(outerHandlerCalled).toBe(false);
   });
 
-  it("does not propagate the event to the outer element if the capture does not resolves", () => {
+  it("does not propagate the event to the outer element if the resolver does not resolves", () => {
     const span = h(['span', { id: 'name' }]);
     const inner = h(['div', { id: 'person' }, span]);
     const outer = h(['div', inner]);
@@ -158,7 +158,7 @@ describe("capture", () => {
 
     // Subscribe handler for the inner element and stop propagation
     let innerHandlerCalled = false;
-    Alon.capture(
+    Alon.bubbling(
       inner,
       (p) => p.person.random,
       (r, e) => {
@@ -168,7 +168,7 @@ describe("capture", () => {
 
     // Subscribe handler for the outer element
     let outerHandlerCalled = false;
-    Alon.capture(
+    Alon.bubbling(
       outer,
       (p) => p.person.name,
       (r, e) => {

@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chatbox Example</title>
-    <script type="text/javascript" src="alon.js"></script>
-    <script src="habiscript.bundle.js"></script>
+    <script type="text/javascript" src="vendor/alon.js"></script>
+    <script src="vendor/habiscript.bundle.js"></script>
     <style>
       user-input {
         --primary-color: #4caf50;
@@ -16,12 +16,15 @@
     </style>
   </head>
   <body>
-    <script type="text/javascript" src="alon-element.js" defer></script>
-    <script type="text/javascript" src="user-input.js" defer></script>
-    <script type="text/javascript" src="chat.js" defer></script>
-    <chat>
-      <messages></messages>
+    <thread-controller>
+      <thread-display></thread-display>
       <user-input></user-input>
-    </chat>
+    </thread-controller>
+
+    <script type="text/javascript" src="vendor/alon-element.js"></script>
+
+    <script type="text/javascript" src="thread-controller.js" defer></script>
+    <script type="text/javascript" src="thread-display.js" defer></script>
+    <script type="text/javascript" src="user-input.js" defer></script>
   </body>
 </html>

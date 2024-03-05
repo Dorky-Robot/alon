@@ -63,7 +63,6 @@ class UserInput extends AlonElement {
     return this.input.value;
   }
 
-
   connectedCallback() {
     this.intercept(this.form, 'submit', (e) => {
       this.signalUp({ userInput: { value: this.value } });

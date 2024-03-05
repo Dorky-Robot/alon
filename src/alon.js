@@ -2,18 +2,24 @@
   const ALON_EVENT = '__AlonEvent__';
 
   function signalDown(element, payload) {
-    element.dispatchEvent(new CustomEvent(ALON_EVENT, {
+    const event = new CustomEvent(ALON_EVENT, {
       detail: { ...payload, __alonSignalDown__: true },
-      bubbles: false,
-      cancelable: true
-    }));
+      bubbles: true,
+      cancelable: true,
+      composed: true
+    });
+
+    findLeafElements(element).forEach((leafElement) => {
+      leafElement.dispatchEvent(event);
+    });
   }
 
   function signalUp(element, payload) {
     element.dispatchEvent(new CustomEvent(ALON_EVENT, {
       detail: { ...payload, __alonSignalUp__: true },
       bubbles: true,
-      cancelable: true
+      cancelable: true,
+      composed: true
     }));
   }
 
@@ -39,6 +45,7 @@
 
     for (const [resolver, handlers] of handlerMap.entries()) {
       const result = resolver(e.detail);
+      console.log('result', result, e.detail, resolver, handlers)
       if (result !== undefined) {
         handlers.forEach((handler) => handler(result, e));
       }
@@ -50,7 +57,7 @@
       element.alonCaptureHandlers = new Map();
 
       element.addEventListener(ALON_EVENT, (e) => {
-        if (e.detail.__alonSignalDown__) return;
+        if (e.detail.__alonSignalUp__) return;
         _genericEventHandler(e, h);
       }, true);
     }
@@ -62,14 +69,14 @@
     h.set(resolver, handlers);
   }
 
-  function absorb(element, resolver, handler) {
+  function bubbling(element, resolver, handler) {
     if (!element.alonAbsorbHandlers) {
       element.alonAbsorbHandlers = new Map();
 
       element.addEventListener(ALON_EVENT, (e) => {
-        if (e.detail.__alonSignalUp__) return;
+        if (e.detail.__alonSignalDown__) return;
         _genericEventHandler(e, h);
-      }, true);
+      });
     }
 
     const h = element.alonAbsorbHandlers;
@@ -86,12 +93,40 @@
     });
   }
 
+  function findLeafElements(element) {
+    let leafElements = [];
+
+    function walkThrough(element) {
+      // Get all children nodes
+      let children = element.childNodes;
+
+      // If the element has no children, it's a leaf
+      if (children.length === 0) {
+        // Assuming we only want to consider elements, not text nodes or others
+        if (element instanceof HTMLElement) {
+          leafElements.push(element);
+        }
+      } else {
+        // Otherwise, go through all the children
+        children.forEach((child) => {
+          walkThrough(child);
+        });
+      }
+    }
+
+    // Start the recursive search from the provided element
+    walkThrough(element);
+
+    return leafElements;
+  }
+
+
   window.Alon = {
     signalDown,
     signalUp,
     capture,
     gapDown,
-    absorb,
+    bubbling,
     gapUp,
     intercept
   };
