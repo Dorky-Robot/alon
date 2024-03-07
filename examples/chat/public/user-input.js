@@ -2,7 +2,7 @@ class UserInput extends AlonElement {
   constructor() {
     super();
 
-    const styles = Habiscript.style({
+    const styles = this.style({
       form: {
         display: 'flex',
         alignItems: 'center',
@@ -40,15 +40,29 @@ class UserInput extends AlonElement {
       }
     });
 
-    const form = Habiscript.toElement([
+    const form = this.h([
       'form',
-      ['textarea', { 'name': 'input', 'placeholder': 'Enter message' }],
-      ['button', { 'type': 'submit' }, 'Send']
+      ['textarea', {
+        name: 'input',
+        placeholder: 'Enter message',
+        onkeypress: this.handleKeypress
+      }],
+      ['button', { type: 'submit' }, 'Send']
     ]);
 
     const shadowRoot = this.attachShadow({ mode: 'open' });
     shadowRoot.appendChild(styles);
     shadowRoot.appendChild(form);
+  }
+
+  handleKeypress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) this.submit(e);
+  };
+
+  submit = (e) => {
+    e.preventDefault();
+    this.signalUp({ userInput: { value: this.value } });
+    this.form.reset();
   }
 
   get input() {
@@ -64,10 +78,7 @@ class UserInput extends AlonElement {
   }
 
   connectedCallback() {
-    this.intercept(this.form, 'submit', (e) => {
-      this.signalUp({ userInput: { value: this.value } });
-      e.currentTarget.reset();
-    });
+    this.intercept(this.form, 'submit', this.submit);
   }
 }
 
