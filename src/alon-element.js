@@ -3,6 +3,8 @@
 class AlonElement extends HTMLElement {
   constructor() {
     super();
+
+    this.shadow = this.attachShadow({ mode: 'open' });
   }
 
   intercept(targetElement, eventType, callback) {
@@ -28,20 +30,16 @@ class AlonElement extends HTMLElement {
     window.Alon.capture(this, resolver, handler);
   }
 
-  static h(habi) {
-    return Habiscript.toElement(habi);
-  }
-
-  h(habi) {
-    return this.constructor.h(habi);
+  html(habi) {
+    return this.shadow.appendChild(
+      Habiscript.toElement(habi)
+    );
   }
 
   style(styles) {
-    return this.constructor.style(styles);
-  }
-
-  static style(styles) {
-    return Habiscript.style(styles);
+    return this.shadow.appendChild(
+      Habiscript.style(styles)
+    );
   }
 }
 

@@ -2,7 +2,7 @@ class UserInput extends AlonElement {
   constructor() {
     super();
 
-    const styles = this.style({
+    this.style({
       form: {
         display: 'flex',
         alignItems: 'center',
@@ -40,24 +40,16 @@ class UserInput extends AlonElement {
       }
     });
 
-    const form = this.h([
+    this.html([
       'form',
       ['textarea', {
         name: 'input',
         placeholder: 'Enter message',
-        onkeypress: this.handleKeypress
+        onkeypress: (e) => { if (e.key === 'Enter' && !e.shiftKey) this.submit(e) }
       }],
       ['button', { type: 'submit' }, 'Send']
     ]);
-
-    const shadowRoot = this.attachShadow({ mode: 'open' });
-    shadowRoot.appendChild(styles);
-    shadowRoot.appendChild(form);
   }
-
-  handleKeypress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) this.submit(e);
-  };
 
   submit = (e) => {
     e.preventDefault();

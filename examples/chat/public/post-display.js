@@ -56,9 +56,7 @@ class PostDisplay extends AlonElement {
   constructor() {
     super();
 
-    const shadowRoot = this.attachShadow({ mode: 'open' });
-
-    const styles = this.style({
+    this.style({
       ':host': {
         display: 'block',
         margin: 'var(--post-margin, 1rem 0.2rem)',
@@ -94,19 +92,18 @@ class PostDisplay extends AlonElement {
       },
     });
 
-    shadowRoot.appendChild(styles);
-    shadowRoot.appendChild(this.h(['slot']));
+    this.html(['slot']);
   }
 
   static text(content) {
-    return this.h([
+    return Habiscript.toElement([
       'post-display',
       ['p', content]
     ]);
   }
 
   static image({ src, alt }) {
-    return this.h([
+    return Habiscript.toElement([
       'post-display',
       [
         'img',

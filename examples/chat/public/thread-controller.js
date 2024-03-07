@@ -2,10 +2,7 @@ class ThreadController extends AlonElement {
   constructor() {
     super();
 
-    const shadowRoot = this.attachShadow({ mode: 'open' });
-    shadowRoot.appendChild(
-      Habiscript.toElement(['slot'])
-    )
+    this.html(['slot']);
   }
 
   connectedCallback() {

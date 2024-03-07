@@ -1,7 +1,6 @@
 class ThreadDisplay extends AlonElement {
   constructor() {
     super();
-    this.attachShadow({ mode: 'open' });
   }
 
   addPost(message) {
