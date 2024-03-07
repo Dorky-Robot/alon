@@ -51,7 +51,6 @@
  * This setup demonstrates how to include the PostDisplay component in your project
  * and how to style it using CSS custom properties. The component automatically handles different content types without needing to specify slots.
  */
-
 class PostDisplay extends AlonElement {
   constructor() {
     super();

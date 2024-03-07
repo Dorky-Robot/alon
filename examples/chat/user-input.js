@@ -53,7 +53,7 @@ class UserInput extends AlonElement {
 
   submit = (e) => {
     e.preventDefault();
-    this.signalUp({ userInput: { value: this.value } });
+    this.signalUp({ userInput: { value: this.value, type: 'text' } });
     this.form.reset();
   }
 

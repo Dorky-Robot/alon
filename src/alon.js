@@ -45,7 +45,6 @@
 
     for (const [resolver, handlers] of handlerMap.entries()) {
       const result = resolver(e.detail);
-      console.log('result', result, e.detail, resolver, handlers)
       if (result !== undefined) {
         handlers.forEach((handler) => handler(result, e));
       }
