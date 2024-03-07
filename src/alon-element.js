@@ -27,6 +27,22 @@ class AlonElement extends HTMLElement {
   capture(resolver, handler) {
     window.Alon.capture(this, resolver, handler);
   }
+
+  static h(habi) {
+    return Habiscript.toElement(habi);
+  }
+
+  h(habi) {
+    return this.constructor.h(habi);
+  }
+
+  style(styles) {
+    return this.constructor.style(styles);
+  }
+
+  static style(styles) {
+    return Habiscript.style(styles);
+  }
 }
 
 // Define the custom element

@@ -27,7 +27,9 @@
  * Usage examples:
  * 
  * <!-- For text content -->
- * <post-display>This is some sample text content that will be automatically slotted.</post-display>
+ * <post-display>
+ *   <p>This is some sample text content that will be automatically slotted.</p>
+ * </post-display>
  * 
  * <!-- For an image -->
  * <post-display>
@@ -43,49 +45,75 @@
  * 
  * <!-- Example with a different theme -->
  * <post-display class="dark-theme">
- *   This post has a dark theme and also supports text directly.
+ *   <p>This post has a dark theme and also supports text directly.</p>
  * </post-display>
  * 
  * This setup demonstrates how to include the PostDisplay component in your project
  * and how to style it using CSS custom properties. The component automatically handles different content types without needing to specify slots.
  */
 
-class PostDisplay extends HTMLElement {
+class PostDisplay extends AlonElement {
   constructor() {
     super();
-    // Use HabiScript to define styles and slot
+
     const shadowRoot = this.attachShadow({ mode: 'open' });
-    const styles = HabiScript.style({
+
+    const styles = this.style({
       ':host': {
         display: 'block',
-        margin: 'var(--post-margin, 1rem)',
-        padding: 'var(--post-padding, 1rem)',
-        border: 'var(--post-border, 1px solid #ccc)',
-        borderRadius: 'var(--post-border-radius, 8px)',
-        background: 'var(--post-background, #f9f9f9)',
+        margin: 'var(--post-margin, 1rem 0.2rem)',
+        padding: 'var(--post-padding, 0.3rem)',
+        border: 'var(--post-border, 1px solid rgba(0, 0, 0, 0.1))',
+        borderRadius: 'var(--post-border-radius, 10px)',
+        background: 'var(--post-background, white)',
+        boxShadow: 'var(--post-shadow, 0 1px 1px rgba(0, 0, 0, 0.1))',
+        fontFamily: 'var(--post-font-family, "Helvetica Neue", Helvetica, Arial, sans-serif)',
+        boxSizing: 'border-box',
       },
       '::slotted(*)': {
+        margin: 'var(--post-content-margin, 0.2rem 0.5rem)',
+        padding: 0,
         maxWidth: '100%',
         height: 'auto',
-      }
+        boxSizing: 'border-box',
+      },
+      '::slotted(img)': {
+        maxWidth: '100%',
+        height: 'auto',
+        display: 'block',
+        borderRadius: '8px',
+      },
+      '::slotted(video)': {
+        maxWidth: '100%',
+        display: 'block',
+        borderRadius: '8px',
+      },
+      '::slotted(p)': {
+        color: 'var(--post-text-color, #333)',
+        lineHeight: 'var(--post-text-line-height, 1.6)',
+      },
     });
 
-    // Define the slot within the shadow DOM using HabiScript
-    const slot = HabiScript.toElement(['slot', { name: 'content' }]);
-
-    // Append styles and slot to the shadow DOM
     shadowRoot.appendChild(styles);
-    shadowRoot.appendChild(slot);
+    shadowRoot.appendChild(this.h(['slot']));
   }
 
-  connectedCallback() {
-    // Dynamically assign slots based on child element types
-    Array.from(this.children).forEach(child => {
-      // Use the child tag name to dynamically set the slot name
-      child.setAttribute('slot', child.tagName.toLowerCase()); // Assign slot as 'img', 'video', 'audio', etc.
-    });
+  static text(content) {
+    return this.h([
+      'post-display',
+      ['p', content]
+    ]);
+  }
+
+  static image({ src, alt }) {
+    return this.h([
+      'post-display',
+      [
+        'img',
+        { src, alt }
+      ]
+    ]);
   }
 }
 
 customElements.define('post-display', PostDisplay);
-

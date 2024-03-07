@@ -5,8 +5,7 @@ class ThreadDisplay extends AlonElement {
   }
 
   addPost(message) {
-    const post = Habiscript.toElement(['p', message]);
-    this.shadowRoot.appendChild(post);
+    this.shadowRoot.appendChild(PostDisplay.text(message));
   }
 
   connectedCallback() {
