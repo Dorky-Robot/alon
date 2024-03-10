@@ -1,4 +1,4 @@
-customElements.define('posts-display', class extends AlonElement {
+class Posts extends AlonElement {
   constructor() {
     super();
 
@@ -15,13 +15,4 @@ customElements.define('posts-display', class extends AlonElement {
       this.prepend(newPostElement);
     }
   }
-
-  connectedCallback() {
-    this.bubbling(
-      (p) => {
-        return p.userInput
-      },
-      (input) => this.addPost(input)
-    )
-  }
-});
+};

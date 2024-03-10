@@ -4,8 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sematics</title>
-    <script type="text/javascript" src="vendor/alon.js"></script>
-    <script src="vendor/habiscript.bundle.js"></script>
     <style>
       user-input {
         --primary-color: #544caf;
@@ -16,14 +14,7 @@
     </style>
   </head>
   <body>
-    <posts-display>
-      <user-input></user-input>
-    </posts-display>
-
-    <script type="text/javascript" src="vendor/alon-element.js"></script>
-
-    <script type="text/javascript" src="posts-display.js" defer></script>
-    <script type="text/javascript" src="post-display.js" defer></script>
-    <script type="text/javascript" src="user-input.js" defer></script>
+    <alon-composer></alon-composer>
+    <script src="./alon-composer.bundle.js"></script>
   </body>
 </html>

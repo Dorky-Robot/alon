@@ -1,0 +1,1 @@
+../../dist/alon-composer.bundle.js

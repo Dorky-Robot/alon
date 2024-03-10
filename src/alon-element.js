@@ -1,47 +1,66 @@
-// Import the Alon module if it's an ES6 module
-// import Alon from './alon.js'; // Assuming alon.js is an ES6 module
+import { signalDown, signalUp, capture, bubbling, gapUp, intercept } from './alon.js';
+import { toElement, style } from 'habiscript'; // Assuming you have a similar 
+
 class AlonElement extends HTMLElement {
+  static components = new Set();
+
   constructor() {
     super();
 
     this.shadow = this.attachShadow({ mode: 'open' });
   }
 
+  static register(webComponent) {
+    const name = webComponent.name;
+    customElements.define(
+      webComponent.name,
+      webComponent
+    );
+
+    this.components.add(webComponent)
+  }
+
+  static toKebabCase(className) {
+    // This will find capital letters and prepend them with a hyphen, then convert the whole string to lowercase
+    return className.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+  }
+
+  isAlon() { return true; }
+
   intercept(targetElement, eventType, callback) {
-    window.Alon.intercept(this, targetElement, eventType, (e) => {
+    Alon.intercept(this, targetElement, eventType, (e) => {
       callback(e);
     });
   }
 
   // You can also directly reference the other methods
   signalUp(payload) {
-    window.Alon.signalUp(this, payload);
+    signalUp(this, payload);
   }
 
   signalDown(payload) {
-    window.Alon.signalDown(this, payload);
+    signalDown(this, payload);
   }
 
   bubbling(resolver, handler) {
-    window.Alon.bubbling(this, resolver, handler);
+    bubbling(this, resolver, handler);
   }
 
   capture(resolver, handler) {
-    window.Alon.capture(this, resolver, handler);
+    capture(this, resolver, handler);
   }
 
   html(habi) {
     return this.shadow.appendChild(
-      Habiscript.toElement(habi)
+      toElement(habi)
     );
   }
 
   style(styles) {
     return this.shadow.appendChild(
-      Habiscript.style(styles)
+      style(styles)
     );
   }
 }
 
-// Define the custom element
-customElements.define('alon-element', AlonElement);
+export default AlonElement;
