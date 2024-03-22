@@ -1,6 +1,6 @@
 {
-  "name": "pure.ui",
-  "version": "0.0.2",
+  "name": "alon",
+  "version": "0.0.3",
   "description": "Receptor based DOM eventing system",
   "main": "alon.js",
   "author": "Felix Flores",
