@@ -7,7 +7,7 @@
   "license": "ISC",
   "scripts": {
     "build": "rollup -c",
-    "habiscript": "rm -rf ./src/habiscript/* && mkdir -p ./src/habiscript/ && cp ./node_modules/habiscript/dist/*.* ./src/habiscript/"
+    "watch": "rollup -c --watch"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^25.0.7",

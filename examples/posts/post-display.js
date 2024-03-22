@@ -51,7 +51,7 @@
  * This setup demonstrates how to include the PostDisplay component in your project
  * and how to style it using CSS custom properties. The component automatically handles different content types without needing to specify slots.
  */
-class Post extends AlonElement {
+class PostDisplay extends AlonElement {
   constructor() {
     super();
 
@@ -95,14 +95,14 @@ class Post extends AlonElement {
   }
 
   static text(content) {
-    return Habiscript.toElement([
+    return AlonElement.toElement([
       'post-display',
       ['p', content]
     ]);
   }
 
   static image({ src, alt }) {
-    return Habiscript.toElement([
+    return AlonElement.toElement([
       'post-display',
       [
         'img',

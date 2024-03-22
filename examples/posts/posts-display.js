@@ -1,4 +1,4 @@
-class Posts extends AlonElement {
+class PostsDisplay extends AlonElement {
   constructor() {
     super();
 
@@ -15,4 +15,15 @@ class Posts extends AlonElement {
       this.prepend(newPostElement);
     }
   }
+
+  connectedCallback() {
+    this.bubbling(
+      (p) => {
+        return p.userInput
+      },
+      (input) => this.addPost(input)
+    )
+  }
 };
+
+AlonElement.register(PostsDisplay);

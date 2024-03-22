@@ -1,3 +1,12 @@
+import {
+  bubbling,
+  signalUp,
+  capture,
+  signalDown,
+  gapUp,
+  gapDown
+} from './alon.js';
+
 describe("bubbling", () => {
   const h = Habiscript.toElement,
     span = h(['span', { id: 'name' }]),
@@ -9,20 +18,20 @@ describe("bubbling", () => {
     document.body.appendChild(container);
 
     let name;
-    Alon.bubbling(
+    bubbling(
       container,
       (p) => p.person.name,
       (r) => name = r
     );
 
     let absorbed = 0;
-    Alon.capture(
+    capture(
       container,
       (p) => p.person.name,
       (_) => absorbed++
     );
 
-    Alon.signalUp(
+    signalUp(
       span,
       { person: { name: 'Felix' } }
     );
@@ -36,18 +45,18 @@ describe("bubbling", () => {
 
     let firstName;
     let lastName;
-    Alon.bubbling(
+    bubbling(
       container,
       (p) => p.person.firstName,
       (r) => { firstName = r; }
     );
-    Alon.bubbling(
+    bubbling(
       container,
       (p) => p.person.lastName,
       (r) => { lastName = r; }
     );
 
-    Alon.signalUp(span, { person: { firstName: 'Felix', lastName: 'Flores' } });
+    signalUp(span, { person: { firstName: 'Felix', lastName: 'Flores' } });
 
     expect(firstName).toEqual('Felix');
     expect(lastName).toEqual('Flores');
@@ -57,13 +66,13 @@ describe("bubbling", () => {
     document.body.appendChild(container);
 
     let nameCalled = false;
-    Alon.bubbling(
+    bubbling(
       container,
       (p) => undefined, // Resolver fails to resolve
       (r) => { nameCalled = true; }
     );
 
-    Alon.signalUp(span, { person: { name: 'Felix' } });
+    signalUp(span, { person: { name: 'Felix' } });
 
     expect(nameCalled).toBe(false);
   });
@@ -72,13 +81,13 @@ describe("bubbling", () => {
     document.body.appendChild(container);
 
     let nameCalled = false;
-    Alon.bubbling(
+    bubbling(
       container,
       (p) => false, // Resolver returns false
       (r) => { nameCalled = true; }
     );
 
-    Alon.signalUp(span, { person: { name: 'Felix' } });
+    signalUp(span, { person: { name: 'Felix' } });
 
     expect(nameCalled).toBe(true);
   });
@@ -94,18 +103,18 @@ describe("bubbling", () => {
 
     let name1;
     let name2;
-    Alon.bubbling(
+    bubbling(
       container,
       resolver,
       (r) => { name1 = r; }
     );
-    Alon.bubbling(
+    bubbling(
       container,
       resolver,
       (r) => { name2 = r; }
     );
 
-    Alon.signalUp(span, { person: { name: 'Felix Flores' } });
+    signalUp(span, { person: { name: 'Felix Flores' } });
 
     // Check that the resolver was called only once
     expect(resolverCallCount).toEqual(1);
@@ -126,7 +135,7 @@ describe("bubbling", () => {
     let outerHandlerCalled = false;
 
     // Subscribe handler for the inner element and stop propagation
-    Alon.bubbling(
+    bubbling(
       inner,
       (p) => p.person.name,
       (r, e) => {
@@ -135,7 +144,7 @@ describe("bubbling", () => {
     );
 
     // Subscribe handler for the outer element
-    Alon.bubbling(
+    bubbling(
       outer,
       (p) => p.person.name,
       (r, e) => {
@@ -143,7 +152,7 @@ describe("bubbling", () => {
       }
     );
 
-    Alon.signalUp(span, { person: { name: 'Felix Flores' } });
+    signalUp(span, { person: { name: 'Felix Flores' } });
 
     expect(innerHandlerCalled).toBe(true);
     expect(outerHandlerCalled).toBe(false);
@@ -158,7 +167,7 @@ describe("bubbling", () => {
 
     // Subscribe handler for the inner element and stop propagation
     let innerHandlerCalled = false;
-    Alon.bubbling(
+    bubbling(
       inner,
       (p) => p.person.random,
       (r, e) => {
@@ -168,7 +177,7 @@ describe("bubbling", () => {
 
     // Subscribe handler for the outer element
     let outerHandlerCalled = false;
-    Alon.bubbling(
+    bubbling(
       outer,
       (p) => p.person.name,
       (r, e) => {
@@ -177,7 +186,7 @@ describe("bubbling", () => {
       }
     );
 
-    Alon.signalUp(span, { person: { name: 'Felix Flores' } });
+    signalUp(span, { person: { name: 'Felix Flores' } });
     expect(innerHandlerCalled).toBe(false);
     expect(outerHandlerCalled).toBe(false);
   });

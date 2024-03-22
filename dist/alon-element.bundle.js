@@ -69,6 +69,13 @@
     element.alonBubblingHandlers.set(resolver, handlers);
   }
 
+  function intercept(host, targetElement, eventType, callback) {
+    targetElement.addEventListener(eventType, (event) => {
+      if (event.preventDefault) event.preventDefault();
+      callback(event);
+    });
+  }
+
   function findLeafElements(element) {
     let leafElements = [];
 
@@ -434,7 +441,23 @@
   };
 
   class AlonElement extends HTMLElement {
-    static components = new Set();
+    static _components = new Map();
+
+    static get components() {
+      return Object.fromEntries(this._components);
+    }
+
+    static selectorToHabi(selector) {
+      return toHabi($(selector)[0]);
+    }
+
+    static toElement(habi) {
+      return src.toElement(habi);
+    }
+
+    static toHabi(element) {
+      return src.htmlToHabi(element);
+    }
 
     constructor() {
       super();
@@ -443,13 +466,14 @@
     }
 
     static register(webComponent) {
-      webComponent.name;
+      const name = this.toKebabCase(webComponent.name);
+
       customElements.define(
-        webComponent.name,
+        name,
         webComponent
       );
 
-      this.components.add(webComponent);
+      this._components.set(name, webComponent);
     }
 
     static toKebabCase(className) {
@@ -460,7 +484,7 @@
     isAlon() { return true; }
 
     intercept(targetElement, eventType, callback) {
-      Alon.intercept(this, targetElement, eventType, (e) => {
+      intercept(this, targetElement, eventType, (e) => {
         callback(e);
       });
     }

@@ -29,22 +29,5 @@ export default [
       }
     ],
     ...commonConfig,
-  },
-  {
-    input: 'src/alon-composer.js',
-    output: [
-      {
-        file: 'dist/alon-composer.bundle.js',
-        format: 'umd',
-        name: 'AlonComposer'
-      },
-      {
-        file: 'dist/alon-composer.bundle.min.js',
-        format: 'umd',
-        name: 'AlonComposer',
-        plugins: [terser()] // Ensure this is called if you want to minify this output
-      }
-    ],
-    ...commonConfig,
   }
 ];
