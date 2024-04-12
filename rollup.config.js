@@ -1,4 +1,3 @@
-
 import resolve from '@rollup/plugin-node-resolve';
 import { terser } from 'rollup-plugin-terser';
 import commonjs from '@rollup/plugin-commonjs';
@@ -6,12 +5,11 @@ import commonjs from '@rollup/plugin-commonjs';
 const commonConfig = {
   plugins: [
     resolve(),
-    commonjs(), // Add this plugin to handle CommonJS modules
+    commonjs(), // Added to handle CommonJS modules
     // other plugins...
   ]
 };
 
-// Export the configuration as an array to handle multiple entry points
 export default [
   {
     input: 'src/alon-element.js',
@@ -25,7 +23,25 @@ export default [
         file: 'dist/alon-element.bundle.min.js',
         format: 'umd',
         name: 'AlonElement',
-        plugins: [terser()] // Ensure this is called if you want to minify this output
+        plugins: [terser()] // Minify this output
+      }
+    ],
+    ...commonConfig,
+  },
+  // Additional configuration for alon.spec.js
+  {
+    input: 'src/alon.spec.js',
+    output: [
+      {
+        file: 'dist/alon-spec.bundle.js',
+        format: 'umd',
+        name: 'AlonSpec'
+      },
+      {
+        file: 'dist/alon-spec.bundle.min.js',
+        format: 'umd',
+        name: 'AlonSpec',
+        plugins: [terser()] // Minify this output
       }
     ],
     ...commonConfig,
