@@ -2,42 +2,52 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import { terser } from 'rollup-plugin-terser';
 
+// Define Terser options once and reuse them
+const terserOptions = terser({
+  mangle: {
+    reserved: ['AlonElement'] // Preserve class name to prevent mangling
+  },
+  output: {
+    comments: false // Remove comments in the minified output
+  }
+});
+
 const config = {
   input: 'src/alon-element.js',
   output: [
+    // UMD non-minified
     {
       file: 'dist/alon-element.umd.js',
       format: 'umd',
       name: 'AlonElement',
-      sourcemap: true // Enable source maps for the UMD build
+      sourcemap: true
     },
+    // UMD minified
     {
       file: 'dist/alon-element.umd.min.js',
       format: 'umd',
       name: 'AlonElement',
-      sourcemap: true, // Enable source maps explicitly for the minified UMD build
-      plugins: [terser()] // Terser options
+      sourcemap: true,
+      plugins: [terserOptions]
     },
+    // ESM non-minified
     {
       file: 'dist/alon-element.esm.js',
       format: 'es',
-      sourcemap: true // Enable source maps for the ES module build
+      sourcemap: true
     },
+    // ESM minified
     {
       file: 'dist/alon-element.esm.min.js',
       format: 'es',
-      sourcemap: true, // Enable source maps explicitly for the minified ES module build
-      plugins: [terser()] // Terser options
+      sourcemap: true,
+      plugins: [terserOptions]
     }
   ],
   plugins: [
     resolve(),
-    commonjs(),
-    // You can include other plugins here
-  ],
-  // If you want to apply Terser to all outputs, include it in the global plugins array
-  // This will apply it to outputs without specific Terser plugin configuration
-  // plugins: [terser({ output: { comments: false }, sourceMap: true })]
+    commonjs()
+  ]
 };
 
 export default config;
