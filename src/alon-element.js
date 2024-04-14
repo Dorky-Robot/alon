@@ -1,7 +1,6 @@
 import { signalDown, signalUp, capture, bubbling, intercept } from './alon.js';
-import { toElement, htmlToHabi, style } from 'habiscript'; // Assuming you have a similar 
-
-class AlonElement extends HTMLElement {
+import { toElement, htmlToHabi, style } from 'habiscript';
+export default class AlonElement extends HTMLElement {
   static _components = new Map();
 
   static get components() {
@@ -80,4 +79,3 @@ class AlonElement extends HTMLElement {
   }
 }
 
-export default AlonElement;

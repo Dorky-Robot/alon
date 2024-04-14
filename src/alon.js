@@ -1,6 +1,6 @@
 const ALON_EVENT = '__AlonEvent__';
 
-function signalDown(element, payload) {
+export function signalDown(element, payload) {
   const event = new CustomEvent(ALON_EVENT, {
     detail: { ...payload, __alonSignalDown__: true },
     bubbles: true,
@@ -13,7 +13,7 @@ function signalDown(element, payload) {
   });
 }
 
-function signalUp(element, payload) {
+export function signalUp(element, payload) {
   element.dispatchEvent(new CustomEvent(ALON_EVENT, {
     detail: { ...payload, __alonSignalUp__: true },
     bubbles: true,
@@ -22,7 +22,7 @@ function signalUp(element, payload) {
   }));
 }
 
-function gapUp(element, matcher, transformer) {
+export function gapUp(element, matcher, transformer) {
   bubbling(element, matcher, function (payload, event) {
     signalUp(
       element,
@@ -31,7 +31,7 @@ function gapUp(element, matcher, transformer) {
   });
 }
 
-function gapDown(element, matcher, transformer) {
+export function gapDown(element, matcher, transformer) {
   capture(element, matcher, function (payload) {
     signalUp(
       element,
@@ -50,7 +50,7 @@ function _genericEventHandler(e, handlerMap) {
   }
 }
 
-function capture(element, resolver, handler) {
+export function capture(element, resolver, handler) {
   if (!element.alonCaptureHandlers) {
     element.alonCaptureHandlers = new Map();
 
@@ -65,7 +65,7 @@ function capture(element, resolver, handler) {
   element.alonCaptureHandlers.set(resolver, handlers);
 }
 
-function bubbling(element, resolver, handler) {
+export function bubbling(element, resolver, handler) {
   if (!element.alonBubblingHandlers) {
     element.alonBubblingHandlers = new Map();
 
@@ -80,7 +80,7 @@ function bubbling(element, resolver, handler) {
   element.alonBubblingHandlers.set(resolver, handlers);
 }
 
-function intercept(host, targetElement, eventType, callback) {
+export function intercept(host, targetElement, eventType, callback) {
   targetElement.addEventListener(eventType, (event) => {
     if (event.preventDefault) event.preventDefault();
     callback(event);
@@ -107,13 +107,3 @@ function findLeafElements(element) {
   return leafElements;
 }
 
-// Exporting the functions so they can be imported in other modules
-export {
-  signalDown,
-  signalUp,
-  capture,
-  gapDown,
-  bubbling,
-  gapUp,
-  intercept
-};

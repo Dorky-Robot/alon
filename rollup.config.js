@@ -15,15 +15,15 @@ export default [
     input: 'src/alon-element.js',
     output: [
       {
-        file: 'dist/alon-element.bundle.js',
-        format: 'umd',
+        file: 'dist/alon-element.esm.js',
+        format: 'es', // ES module format
         name: 'AlonElement'
       },
+      // UMD bundle is kept only if needed
       {
-        file: 'dist/alon-element.bundle.min.js',
+        file: 'dist/alon-element.umd.js',
         format: 'umd',
-        name: 'AlonElement',
-        plugins: [terser()] // Minify this output
+        name: 'AlonElement'
       }
     ],
     ...commonConfig,
@@ -33,16 +33,10 @@ export default [
     input: 'src/alon.spec.js',
     output: [
       {
-        file: 'dist/alon-spec.bundle.js',
+        file: 'dist/alon-spec.umd.js',
         format: 'umd',
         name: 'AlonSpec'
       },
-      {
-        file: 'dist/alon-spec.bundle.min.js',
-        format: 'umd',
-        name: 'AlonSpec',
-        plugins: [terser()] // Minify this output
-      }
     ],
     ...commonConfig,
   }

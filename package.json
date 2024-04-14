@@ -1,6 +1,6 @@
 {
   "name": "alon",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Receptor based DOM eventing system",
   "main": "dist/alon-element.bundle.js",
   "author": "Felix Flores",
