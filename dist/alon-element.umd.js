@@ -522,3 +522,4 @@
   return AlonElement;
 
 }));
+//# sourceMappingURL=alon-element.umd.js.map

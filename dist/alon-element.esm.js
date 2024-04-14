@@ -92,109 +92,109 @@ function findLeafElements(element) {
 
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
-var tanaw_bundle = { exports: {} };
+var tanaw_bundle = {exports: {}};
 
 tanaw_bundle.exports;
 
 (function (module, exports) {
-  (function (global, factory) {
-    module.exports = factory();
-  })(commonjsGlobal, (function () {
-    function getDefaultExportFromCjs(x) {
-      return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
-    }
+	(function (global, factory) {
+		module.exports = factory() ;
+	})(commonjsGlobal, (function () {
+		function getDefaultExportFromCjs (x) {
+			return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
+		}
 
-    function style(stylesObject) {
-      if (isEmpty(stylesObject)) return stylesObject;
-      return compileStyles(processStyles({ stylesObject }));
-    }
+		function style(stylesObject) {
+		  if (isEmpty(stylesObject)) return stylesObject;
+		  return compileStyles(processStyles({ stylesObject }));
+		}
 
-    const NO_SELECTOR = '__*__';
+		const NO_SELECTOR = '__*__';
 
-    function processStyles({ stylesObject, parentSelector = '', cssObject = {}, nestedSelector = '' }) {
-      if (Array.isArray(stylesObject)) {
-        const [property, value] = stylesObject;
-        const cssProperty = `${camelToKebabCase(property)}:${value};`;
-        const targetObject = nestedSelector ? (cssObject[nestedSelector] = cssObject[nestedSelector] || {}) : cssObject;
-        const key = camelToKebabCase(parentSelector || NO_SELECTOR);
+		function processStyles({ stylesObject, parentSelector = '', cssObject = {}, nestedSelector = '' }) {
+		  if (Array.isArray(stylesObject)) {
+		    const [property, value] = stylesObject;
+		    const cssProperty = `${camelToKebabCase(property)}:${value};`;
+		    const targetObject = nestedSelector ? (cssObject[nestedSelector] = cssObject[nestedSelector] || {}) : cssObject;
+		    const key = camelToKebabCase(parentSelector || NO_SELECTOR);
 
-        targetObject[key] = (targetObject[key] || '') + cssProperty;
-      } else {
-        Object.keys(stylesObject).forEach(key => {
-          const value = stylesObject[key];
-          if (key.startsWith('@')) {
-            // Inline handling for media queries and nested selectors
-            processStyles({
-              stylesObject: value,
-              cssObject: cssObject,
-              nestedSelector: key
-            });
-          } else if (typeof value !== 'object') {
-            // Inline handling for direct property-value pairs
-            const cssProperty = `${camelToKebabCase(key)}:${value};`;
-            const targetObject = nestedSelector ? (cssObject[nestedSelector] = cssObject[nestedSelector] || {}) : cssObject;
-            const combinedKey = camelToKebabCase(parentSelector || NO_SELECTOR);
-            targetObject[combinedKey] = (targetObject[combinedKey] || '') + cssProperty;
-          } else {
-            // Inline handling for nested selectors
-            const combinedSelector = combineSelectors(parentSelector, key);
-            processStyles({
-              stylesObject: value,
-              parentSelector: combinedSelector,
-              cssObject: cssObject,
-              nestedSelector
-            });
-          }
-        });
-      }
+		    targetObject[key] = (targetObject[key] || '') + cssProperty;
+		  } else {
+		    Object.keys(stylesObject).forEach(key => {
+		      const value = stylesObject[key];
+		      if (key.startsWith('@')) {
+		        // Inline handling for media queries and nested selectors
+		        processStyles({
+		          stylesObject: value,
+		          cssObject: cssObject,
+		          nestedSelector: key
+		        });
+		      } else if (typeof value !== 'object') {
+		        // Inline handling for direct property-value pairs
+		        const cssProperty = `${camelToKebabCase(key)}:${value};`;
+		        const targetObject = nestedSelector ? (cssObject[nestedSelector] = cssObject[nestedSelector] || {}) : cssObject;
+		        const combinedKey = camelToKebabCase(parentSelector || NO_SELECTOR);
+		        targetObject[combinedKey] = (targetObject[combinedKey] || '') + cssProperty;
+		      } else {
+		        // Inline handling for nested selectors
+		        const combinedSelector = combineSelectors(parentSelector, key);
+		        processStyles({
+		          stylesObject: value,
+		          parentSelector: combinedSelector,
+		          cssObject: cssObject,
+		          nestedSelector
+		        });
+		      }
+		    });
+		  }
 
-      return cssObject;
-    }
+		  return cssObject;
+		}
 
-    function combineSelectors(parent, child) {
-      if (!parent) return child;
-      const parentSelectors = splitAndTrim(parent);
-      const childSelectors = splitAndTrim(child);
+		function combineSelectors(parent, child) {
+		  if (!parent) return child;
+		  const parentSelectors = splitAndTrim(parent);
+		  const childSelectors = splitAndTrim(child);
 
-      const combined = parentSelectors.map(p =>
-        childSelectors.map(c => `${p}${c.startsWith(':') ? '' : ' '}${c}`).join(',')
-      ).join(',');
+		  const combined = parentSelectors.map(p =>
+		    childSelectors.map(c => `${p}${c.startsWith(':') ? '' : ' '}${c}`).join(',')
+		  ).join(',');
 
-      return combined;
-    }
+		  return combined;
+		}
 
-    function camelToKebabCase(str) {
-      return str.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
-    }
+		function camelToKebabCase(str) {
+		  return str.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+		}
 
-    function splitAndTrim(str) {
-      return str.split(',').map(s => s.trim());
-    }
+		function splitAndTrim(str) {
+		  return str.split(',').map(s => s.trim());
+		}
 
-    function compileStyles(cssObject) {
-      if (typeof cssObject !== 'object' || Array.isArray(cssObject) || isEmpty(cssObject)) {
-        return cssObject;
-      }
+		function compileStyles(cssObject) {
+		  if (typeof cssObject !== 'object' || Array.isArray(cssObject) || isEmpty(cssObject)) {
+		    return cssObject;
+		  }
 
-      return Object.entries(cssObject).map(([key, value]) =>
-        key === NO_SELECTOR ? compileStyles(value) : `${key}{${compileStyles(value)}}`
-      ).join('');
-    }
+		  return Object.entries(cssObject).map(([key, value]) =>
+		    key === NO_SELECTOR ? compileStyles(value) : `${key}{${compileStyles(value)}}`
+		  ).join('');
+		}
 
-    function isEmpty(obj) {
-      return !obj || Object.keys(obj).length === 0;
-    }
+		function isEmpty(obj) {
+		  return !obj || Object.keys(obj).length === 0;
+		}
 
-    var tanaw = {
-      style
-    };
+		var tanaw = {
+		  style
+		};
 
-    var tanaw$1 = /*@__PURE__*/getDefaultExportFromCjs(tanaw);
+		var tanaw$1 = /*@__PURE__*/getDefaultExportFromCjs(tanaw);
 
-    return tanaw$1;
+		return tanaw$1;
 
-  }));
-}(tanaw_bundle, tanaw_bundle.exports));
+	})); 
+} (tanaw_bundle, tanaw_bundle.exports));
 
 var tanaw_bundleExports = tanaw_bundle.exports;
 
@@ -514,3 +514,4 @@ class AlonElement extends HTMLElement {
 }
 
 export { AlonElement as default };
+//# sourceMappingURL=alon-element.esm.js.map
