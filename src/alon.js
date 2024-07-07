@@ -106,4 +106,3 @@ function findLeafElements(element) {
   walkThrough(element);
   return leafElements;
 }
-

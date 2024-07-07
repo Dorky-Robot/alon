@@ -52,6 +52,7 @@ class UserInput extends AlonElement {
   }
 
   submit = (e) => {
+    console.log(e)
     e.preventDefault();
     this.signalUp({ userInput: { value: this.value, type: 'text' } });
     this.form.reset();
@@ -68,10 +69,6 @@ class UserInput extends AlonElement {
   get value() {
     return this.input.value;
   }
-
-  connectedCallback() {
-    this.intercept(this.form, 'submit', this.submit);
-  }
 }
 
-customElements.define('user-input', UserInput);
+AlonElement.register(UserInput);
