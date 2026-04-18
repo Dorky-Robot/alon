@@ -1,0 +1,5 @@
+{:paths ["src"]
+ :tasks
+ {:requires ([alon.main])
+  start    {:doc  "Start the alon server. Usage: bb start <entry-file> [--port N]"
+            :task (apply alon.main/-main *command-line-args*)}}}

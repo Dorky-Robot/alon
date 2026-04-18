@@ -1,0 +1,58 @@
+(ns alon-ui.canvas
+  (:require [alon-ui.state :as state]
+            [alon-ui.file-card :as file-card]
+            [alon-ui.edges :as edges]
+            [reagent.core :as r]))
+
+(defn- viewport []
+  (let [pan-state (r/atom nil)
+        on-down   (fn [e]
+                    (let [target (.-target e)]
+                      (when (or (= target (.-currentTarget e))
+                                (.. target -classList (contains "viewport"))
+                                (.. target -classList (contains "canvas")))
+                        (reset! pan-state {:x (- (.-clientX e) (:pan-x @state/state))
+                                           :y (- (.-clientY e) (:pan-y @state/state))}))))
+        on-move   (fn [e]
+                    (when-let [p @pan-state]
+                      (state/set-pan! (- (.-clientX e) (:x p))
+                                      (- (.-clientY e) (:y p)))))
+        on-up     (fn [_] (reset! pan-state nil))
+        on-wheel  (fn [e]
+                    ;; Trackpad pinch surfaces as wheel + ctrlKey. Let plain
+                    ;; wheel fall through so scrollable children (e.g. expanded
+                    ;; source) can scroll normally.
+                    (when (.-ctrlKey e)
+                      (.preventDefault e)
+                      (let [factor   (if (pos? (.-deltaY e)) 0.9 1.1)
+                            zoom     (:zoom @state/state)
+                            new-zoom (max 0.2 (min 3 (* zoom factor)))
+                            rect     (.. e -currentTarget getBoundingClientRect)
+                            px       (- (.-clientX e) (.-left rect) (/ (.-width rect) 2))
+                            py       (- (.-clientY e) (.-top rect)  (/ (.-height rect) 2))]
+                        (state/set-zoom! new-zoom px py))))]
+    (r/create-class
+     {:component-did-mount
+      (fn [_]
+        (.addEventListener js/window "mousemove" on-move)
+        (.addEventListener js/window "mouseup"   on-up))
+      :component-will-unmount
+      (fn [_]
+        (.removeEventListener js/window "mousemove" on-move)
+        (.removeEventListener js/window "mouseup"   on-up))
+      :reagent-render
+      (fn []
+        (let [{:keys [shown pan-x pan-y zoom]} @state/state]
+          [:div.viewport
+           {:class         (when @pan-state "panning")
+            :on-mouse-down on-down
+            :on-wheel      on-wheel}
+           [:div.canvas
+            {:style {:transform
+                     (str "translate(" pan-x "px," pan-y "px) scale(" zoom ")")}}
+            [edges/edges]
+            (for [file (keys shown)]
+              ^{:key file} [file-card/file-card file])]]))})))
+
+(defn root []
+  [viewport])

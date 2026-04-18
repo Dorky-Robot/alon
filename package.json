@@ -1,27 +1,13 @@
 {
   "name": "alon",
-  "version": "0.0.9",
-  "description": "Receptor based DOM eventing system",
-  "main": "dist/alon-element.bundle.js",
+  "version": "0.0.10",
+  "description": "A tool for exploring the flow and architecture of a codebase so you can correctly shape it through periods of massive change — including the kind AI now produces. Renders code as a Blueprint-style flow chart of nodes and typed edges; the same graph zooms out into an architectural map. Edges come from both static analysis and LLM interpretation of code that resists static tracing.",
+  "type": "module",
+  "private": true,
   "author": "Felix Flores",
   "license": "ISC",
-  "scripts": {
-    "build": "rollup -c",
-    "watch": "rollup -c --watch"
-  },
-  "devDependencies": {
-    "@rollup/plugin-commonjs": "^25.0.7",
-    "@rollup/plugin-node-resolve": "^15.2.3",
-    "jasmine": "^5.1.0",
-    "jasmine-browser-runner": "^2.3.0",
-    "jasmine-core": "^5.1.2",
-    "rollup": "^2.79.1",
-    "rollup-plugin-terser": "^7.0.2"
-  },
-  "files": [
-    "dist/*"
-  ],
   "dependencies": {
-    "habiscript": "^1.5.0"
+    "@babel/parser": "^7.29.2",
+    "@babel/traverse": "^7.29.0"
   }
 }

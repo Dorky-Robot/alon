@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Idempotent bootstrap for the alon dev environment.
+# Designed to be run inside a kubo (which already has node + npm + curl).
+
+set -e
+
+if command -v bb >/dev/null 2>&1; then
+  echo "✓ babashka already installed: $(bb --version)"
+else
+  echo "→ installing babashka…"
+  curl -sLO https://raw.githubusercontent.com/babashka/babashka/master/install
+  chmod +x install
+  sudo ./install --dir /usr/local/bin
+  rm -f install
+  echo "✓ babashka installed: $(bb --version)"
+fi
+
+if [ -f package.json ] && [ ! -d node_modules ]; then
+  echo "→ installing analyzer npm deps…"
+  npm install --silent
+  echo "✓ npm deps installed"
+fi
+
+echo
+echo "alon is ready. Run:  bin/alon <entry-file>"
