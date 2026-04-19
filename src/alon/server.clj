@@ -35,7 +35,9 @@
         abs  (fs/path root (subs safe 1))]
     (if (and (fs/exists? abs) (fs/regular-file? abs))
       {:status  200
-       :headers {"content-type" (or (MIME (ext (str abs))) "application/octet-stream")}
+       :headers {"content-type"  (or (MIME (ext (str abs))) "application/octet-stream")
+                 ;; Dev tool — never serve stale cljs/js from browser cache.
+                 "cache-control" "no-store"}
        :body    (fs/read-all-bytes abs)}
       {:status 404 :body "not found"})))
 

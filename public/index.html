@@ -106,12 +106,18 @@
     }
     .file-card .row.expanded { background: #1c1c25; }
     .file-card .row.expanded + .row { border-top-color: #0c0c12; }
-    .file-card .row.expanded .row-head .kind { color: #8c8ca0; }
-    .file-card .row.expanded .row-head .name { color: #e6e6ea; }
+    /* Direct-child selectors so nested rows don't inherit the
+       dark-background color treatment of their expanded parent. */
+    .file-card .row.expanded > .row-head .kind { color: #8c8ca0; }
+    .file-card .row.expanded > .row-head .name { color: #e6e6ea; }
+
+    .file-card .body {
+      background: #1c1c25;
+    }
     .file-card .source {
       margin: 0;
-      padding: 6px 14px 12px;
-      background: #1c1c25;
+      padding: 0 14px;
+      background: transparent;
       color: #c8c8d4;
       font-family: ui-monospace, SFMono-Regular, monospace;
       font-size: 11px;
@@ -120,6 +126,18 @@
       overflow-x: auto;
       user-select: text;
     }
+    .file-card .body > .source:first-child { padding-top: 6px; }
+    .file-card .body > .source:last-child  { padding-bottom: 12px; }
+
+    /* Nested rows live inside .body. Keep their vertical geometry identical
+       to top-level rows so the analytical row-height math stays correct.
+       A subtle left border + lighter background gives the nesting cue. */
+    .file-card .body .row {
+      background: #ededf0;
+      border-left: 3px solid #5a8aff;
+    }
+    .file-card .body .row.expanded { background: #1c1c25; }
+    .file-card .body .row + .row { border-top: 1px solid #0c0c12; }
     .file-card .path {
       margin-top: 8px;
       padding-left: 4px;

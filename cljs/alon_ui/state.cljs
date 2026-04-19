@@ -1,19 +1,43 @@
 (ns alon-ui.state
-  (:require [reagent.core :as r]))
+  (:require [reagent.core :as r]
+            [clojure.string :as str]))
 
 ;; Schema:
 ;;   {:graph         {:nodes [...] :edges [...] :root "..."}
-;;    :by-id         {node-id node}
-;;    :by-file       {file-path [node ...]}   ; sorted by trace order (DFS from roots)
+;;    :by-id         {node-id node}                 ; nodes carry :parentId :start :end
+;;    :by-file       {file-path [node ...]}         ; TOP-LEVEL nodes only, trace-order
+;;    :children-of   {parent-id [child-id ...]}     ; declaration order (by :start)
+;;    :width-by-file {file-path px}                 ; analytical width (fits widest line)
 ;;    :edges-by-from {node-id [edge ...]}
 ;;    :shown         {file-path {:x N :y N :root? bool}}
 ;;    :expanded      #{node-id}
 ;;    :pan-x N :pan-y N :zoom N}
 
+(def ^:private CHAR-W      6.6)   ; approx px per char at 11px ui-monospace
+(def ^:private SOURCE-PAD  28)    ; left + right padding on .source
+(def ^:private MIN-WIDTH   280)
+(def ^:private MAX-WIDTH   1100)  ; sanity cap; very long lines still scroll
+
+(defn- max-line-len [s]
+  (if (string? s)
+    (transduce (map count) max 0 (str/split s #"\n"))
+    0))
+
+(defn- file-width [nodes]
+  (let [longest (->> nodes (map :source) (map max-line-len) (reduce max 0))]
+    (-> (* longest CHAR-W)
+        (+ SOURCE-PAD)
+        (Math/ceil)
+        (max MIN-WIDTH)
+        (min MAX-WIDTH)
+        int)))
+
 (defonce state
   (r/atom {:graph         nil
            :by-id         {}
            :by-file       {}
+           :children-of   {}
+           :width-by-file {}
            :edges-by-from {}
            :shown         {}
            :expanded      #{}
@@ -47,21 +71,38 @@
   (let [nodes    (:nodes graph)
         by-id    (into {} (map (juxt :id identity)) nodes)
         trace    (compute-trace-order graph)
-        by-file  (reduce (fn [acc n] (update acc (:file n) (fnil conj []) n))
-                         {} nodes)
-        by-file  (into {}
-                       (map (fn [[f ns]]
-                              [f (vec (sort-by #(get trace (:id %) 1e9) ns))]))
-                       by-file)
+        ;; Group children under their parentId, sorted by :start so they
+        ;; appear in source order. Top-level nodes (parentId nil) are kept
+        ;; separately and ordered by trace.
+        children-of (->> nodes
+                         (filter :parentId)
+                         (group-by :parentId)
+                         (into {}
+                               (map (fn [[pid ns]]
+                                      [pid (mapv :id (sort-by :start ns))]))))
+        top-by-file (->> nodes
+                         (remove :parentId)
+                         (group-by :file)
+                         (into {}
+                               (map (fn [[f ns]]
+                                      [f (vec (sort-by #(get trace (:id %) 1e9) ns))]))))
+        ;; Width considers ALL nodes in the file (including nested), so the
+        ;; card stays the same width whether children are expanded or not.
+        width-by-file (->> nodes
+                           (group-by :file)
+                           (into {}
+                                 (map (fn [[f ns]] [f (file-width ns)]))))
         edges-by-from (reduce (fn [m e] (update m (:from e) (fnil conj []) e))
                               {} (:edges graph))
         entry    (:root graph)
-        start-file (or (when (contains? by-file entry) entry)
+        start-file (or (when (contains? top-by-file entry) entry)
                        (some-> (first nodes) :file))]
     (swap! state assoc
            :graph         graph
            :by-id         by-id
-           :by-file       by-file
+           :by-file       top-by-file
+           :children-of   children-of
+           :width-by-file width-by-file
            :edges-by-from edges-by-from
            :shown         (if start-file
                             {start-file {:x 0 :y 0 :root? true}}

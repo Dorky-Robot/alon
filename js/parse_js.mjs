@@ -26,23 +26,44 @@ async function analyze(filePath) {
   const nodes = [];
   const edges = [];
   const declared = new Map();
+  // Map every captured AST function node to its emitted graph id so the
+  // second pass (call edges) and parent lookups can resolve quickly.
+  const fnNodeToId = new WeakMap();
 
   const nodeId = (name, line) =>
     `${path.basename(filePath)}:${name}@${line}`;
 
-  function addNode(name, type, astNode) {
+  function nearestCapturedAncestor(p) {
+    // Walk up function parents, returning the first one whose AST node we
+    // already emitted. Skips over uncaptured anonymous IIFEs etc.
+    let cur = p.getFunctionParent();
+    while (cur) {
+      const target = cur.node.type === 'VariableDeclarator' ? cur.node.init : cur.node;
+      if (fnNodeToId.has(target)) return fnNodeToId.get(target);
+      if (fnNodeToId.has(cur.node)) return fnNodeToId.get(cur.node);
+      cur = cur.getFunctionParent();
+    }
+    return null;
+  }
+
+  function addNode(name, type, astNode, p) {
     if (declared.has(name)) return declared.get(name);
     const line = astNode.loc.start.line;
     const id = nodeId(name, line);
     const source = code.slice(astNode.start, astNode.end);
-    nodes.push({ id, name, type, file: filePath, line, source });
+    const parentId = p ? nearestCapturedAncestor(p) : null;
+    nodes.push({
+      id, name, type, file: filePath, line, source,
+      start: astNode.start, end: astNode.end, parentId,
+    });
     declared.set(name, id);
+    fnNodeToId.set(astNode, id);
     return id;
   }
 
   traverse(ast, {
     FunctionDeclaration(p) {
-      if (p.node.id) addNode(p.node.id.name, 'function', p.node);
+      if (p.node.id) addNode(p.node.id.name, 'function', p.node, p);
     },
     VariableDeclarator(p) {
       const init = p.node.init;
@@ -51,12 +72,12 @@ async function analyze(filePath) {
         (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression') &&
         p.node.id.type === 'Identifier'
       ) {
-        addNode(p.node.id.name, 'function', init);
+        addNode(p.node.id.name, 'function', init, p);
       }
     },
     ClassMethod(p) {
       if (p.node.key.type === 'Identifier') {
-        addNode(p.node.key.name, 'method', p.node);
+        addNode(p.node.key.name, 'method', p.node, p);
       }
     },
   });

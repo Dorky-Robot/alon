@@ -4,25 +4,61 @@
 
 (def OFFSET 10000)
 
+(defn- derive-offset
+  "Best-effort call-site offset within the caller's source: scan for the
+   callee's name. Lets the anchor land on the right line even when the
+   analyzer didn't send offsetStart."
+  [from-node to-node]
+  (when-let [src (:source from-node)]
+    (when-let [nm (:name to-node)]
+      (let [i (.indexOf src nm)]
+        (when (>= i 0) i)))))
+
+(defn- visible?
+  "A node is rendered iff every ancestor in its chain is in :expanded."
+  [s node-id]
+  (loop [id node-id]
+    (let [pid (:parentId (get-in s [:by-id id]))]
+      (cond
+        (nil? pid) true
+        (not (contains? (:expanded s) pid)) false
+        :else (recur pid)))))
+
+(defn- nearest-visible-id
+  "Climb until we hit a node that is actually rendered. Falls back to the
+   nearest visible ancestor when the requested node is hidden inside a
+   collapsed parent — otherwise row-top-y returns a phantom y far below
+   the visible card."
+  [s node-id]
+  (loop [id node-id]
+    (cond
+      (nil? id) nil
+      (visible? s id) id
+      :else (recur (:parentId (get-in s [:by-id id]))))))
+
 (defn- anchor
   "Compute endpoint {:x :y :right?} for `node-id` relative to `other-center-x`.
-   If `call-offset` is given and the node's source is expanded, anchor at the
-   call-site line; otherwise at the row-head center."
-  [s node-id call-offset other-center-x]
-  (when-let [n (get-in s [:by-id node-id])]
-    (when-let [pos (get-in s [:shown (:file n)])]
-      (let [nodes    (get-in s [:by-file (:file n)])
-            expanded (:expanded s)
-            open?    (contains? expanded node-id)
-            y-local  (if (and call-offset open? (:source n))
-                       (let [row-top (fc/row-top-y nodes expanded node-id)]
-                         (+ row-top fc/ROW-H
-                            (fc/source-line-y (:source n) call-offset)))
-                       (fc/row-y-center nodes expanded node-id))
-            my-center (+ (:x pos) (/ fc/CARD-WIDTH 2))
-            right?    (>= other-center-x my-center)
-            x         (+ (:x pos) (if right? fc/CARD-WIDTH 0))]
-        {:x x :y (+ (:y pos) y-local) :right? right?}))))
+   If the requested node is hidden inside a collapsed ancestor, anchor at the
+   nearest visible ancestor's row-head. If `call-offset` is given and the
+   visible node's source is expanded, anchor at the call-site line."
+  [node-id call-offset other-center-x]
+  (let [s @state/state
+        vis-id (nearest-visible-id s node-id)
+        n (get-in s [:by-id vis-id])]
+    (when n
+      (when-let [pos (get-in s [:shown (:file n)])]
+        (let [expanded (:expanded s)
+              same?    (= vis-id node-id)
+              open?    (contains? expanded vis-id)
+              w        (fc/width-for (:file n))
+              y-local  (if (and same? call-offset open? (:source n))
+                         (+ (fc/row-top-y vis-id) fc/ROW-H
+                            (fc/call-site-y vis-id call-offset))
+                         (fc/row-y-center vis-id))
+              my-center (+ (:x pos) (/ w 2))
+              right?    (>= other-center-x my-center)
+              x         (+ (:x pos) (if right? w 0))]
+          {:x x :y (+ (:y pos) y-local) :right? right?})))))
 
 (defn- bezier [ax ay a-right? bx by b-right?]
   (let [dx  (Math/abs (- bx ax))
@@ -34,19 +70,8 @@
          ", " (+ bcx OFFSET) " " (+ by OFFSET)
          ", " (+ bx OFFSET) " " (+ by OFFSET))))
 
-(defn- derive-offset
-  "Best-effort call-site offset: if the analyzer didn't send one, scan the
-   caller's source for the callee's name. Lets the anchor land on the right
-   line even when the cached graph predates the offset field."
-  [from-node to-node]
-  (when-let [src (:source from-node)]
-    (when-let [nm (:name to-node)]
-      (let [i (.indexOf src nm)]
-        (when (>= i 0) i)))))
-
 (defn edges []
-  (let [s @state/state
-        half (/ fc/CARD-WIDTH 2)]
+  (let [s @state/state]
     [:svg.edges {:xmlns "http://www.w3.org/2000/svg"}
      [:defs
       [:marker {:id "arrow" :viewBox "0 0 10 10"
@@ -61,9 +86,11 @@
                  fpos (get-in s [:shown (:file fn')])
                  tpos (get-in s [:shown (:file tn)])]
            :when (and fn' tn fpos tpos)
-           :let [offset (or offsetStart (derive-offset fn' tn))
-                 a (anchor s from offset (+ (:x tpos) half))
-                 b (anchor s to   nil    (+ (:x fpos) half))]
+           :let [t-center (+ (:x tpos) (/ (fc/width-for (:file tn)) 2))
+                 f-center (+ (:x fpos) (/ (fc/width-for (:file fn')) 2))
+                 offset (or offsetStart (derive-offset fn' tn))
+                 a (anchor from offset t-center)
+                 b (anchor to   nil    f-center)]
            :when (and a b)]
        ^{:key (str from "→" to "@" offset)}
        [:path {:d (bezier (:x a) (:y a) (:right? a)
