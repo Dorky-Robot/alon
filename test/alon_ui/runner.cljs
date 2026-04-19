@@ -17,13 +17,15 @@
 
 (require '[alon-ui.file-card-test]
          '[alon-ui.state-test]
-         '[alon-ui.edges-test])
+         '[alon-ui.edges-test]
+         '[alon-ui.highlight-test])
 
 (defn run! []
   (let [{:keys [fail error]}
         (t/run-tests 'alon-ui.file-card-test
                      'alon-ui.state-test
-                     'alon-ui.edges-test)]
+                     'alon-ui.edges-test
+                     'alon-ui.highlight-test)]
     (when (pos? (+ (or fail 0) (or error 0)))
       (js/process.exit 1))))
 

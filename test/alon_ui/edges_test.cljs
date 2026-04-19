@@ -5,9 +5,9 @@
 
 (defn- install-graph! [graph]
   (reset! state/state
-          {:graph nil :by-id {} :edges-by-from {} :width-by-id {}
-           :height-by-id {} :shown {} :focused nil :trail []
-           :pan-x 0 :pan-y 0 :zoom 1})
+          {:graph nil :by-id {} :children-of {} :edges-by-from {} :width-by-id {}
+           :height-by-id {} :shown {} :expanded-nested #{} :fit-mode :all
+           :focused nil :trail [] :pan-x 0 :pan-y 0 :zoom 1})
   (state/init-graph! graph))
 
 (defn- path-nodes [hiccup]

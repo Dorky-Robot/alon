@@ -5,10 +5,15 @@
 ;; Schema:
 ;;   {:graph         {:nodes [...] :edges [...] :root "..."}
 ;;    :by-id         {node-id node}
+;;    :children-of   {parent-id [child-id ...]}   ; immediate children, by parentId
 ;;    :edges-by-from {renderable-fn-id [{:to ... :type ... :offsetStart ... :offsetEnd ... :orig-from ...} ...]}
 ;;    :width-by-id   {fn-id px}       ; analytical width (fits widest source line)
 ;;    :height-by-id  {fn-id px}       ; measured from DOM
 ;;    :shown         {fn-id {:x N :y N :opened-by fn-id|nil :root? bool}}
+;;    :expanded-nested #{nested-id ...}  ; Xcode-style disclosure: empty = all nested
+;;                                       ; fns render as `fn(...) { … }` pills
+;;    :fit-mode      :all | :solo    ; double-tap zoom toggle; any user-initiated
+;;                                    ; camera change resets this to :all
 ;;    :focused       fn-id
 ;;    :trail         [fn-id ...]
 ;;    :pan-x N :pan-y N :zoom N}
@@ -36,17 +41,20 @@
       int))
 
 (defonce state
-  (r/atom {:graph         nil
-           :by-id         {}
-           :edges-by-from {}
-           :width-by-id   {}
-           :height-by-id  {}
-           :shown         {}
-           :focused       nil
-           :trail         []
-           :pan-x         0
-           :pan-y         0
-           :zoom          1}))
+  (r/atom {:graph           nil
+           :by-id           {}
+           :children-of     {}
+           :edges-by-from   {}
+           :width-by-id     {}
+           :height-by-id    {}
+           :shown           {}
+           :expanded-nested #{}
+           :fit-mode        :all
+           :focused         nil
+           :trail           []
+           :pan-x           0
+           :pan-y           0
+           :zoom            1}))
 
 ;; --- Renderability --------------------------------------------------------
 ;;
@@ -207,6 +215,36 @@
                   (max 0.2))
            tx (- (* (:cx bb) tz))
            ty (- (* (:cy bb) tz))]
+       (swap! state assoc :fit-mode :all)
+       (animate-to! tx ty tz duration-ms)))))
+
+(defn- bbox-of-node [fn-id]
+  (let [s @state
+        pos (get-in s [:shown fn-id])
+        w   (or (get-in s [:width-by-id fn-id]) 320)
+        h   (card-height-est fn-id)]
+    (when pos
+      {:cx (+ (:x pos) (/ w 2))
+       :cy (+ (:y pos) (/ h 2))
+       :w  w
+       :h  h})))
+
+(defn animate-to-node!
+  "Pan/zoom so `fn-id`'s card fills the viewport with padding. Unlike
+   animate-to-fit!, this does NOT touch :fit-mode — the caller owns that
+   so double-tap can enter :solo without it getting stomped."
+  ([fn-id] (animate-to-node! fn-id 380))
+  ([fn-id duration-ms]
+   (when-let [bb (bbox-of-node fn-id)]
+     (let [vw  (.-innerWidth js/window)
+           vh  (.-innerHeight js/window)
+           pad 80
+           tz  (-> (min (/ (- vw (* 2 pad)) (max 1 (:w bb)))
+                        (/ (- vh (* 2 pad)) (max 1 (:h bb)))
+                        1.5)
+                   (max 0.2))
+           tx  (- (* (:cx bb) tz))
+           ty  (- (* (:cy bb) tz))]
        (animate-to! tx ty tz duration-ms)))))
 
 ;; --- Navigation -----------------------------------------------------------
@@ -280,6 +318,32 @@
   (swap! state update-in [:shown fn-id]
          (fn [pos] (assoc pos :x (+ origin-x dx) :y (+ origin-y dy)))))
 
+(defn toggle-nested!
+  "Flip the Xcode-style disclosure on a nested function. Collapsed nesteds
+   render as `fn(...) { … }` pills; expanded ones render their body inline
+   with their own children still starting collapsed."
+  [nested-id]
+  (when nested-id
+    (swap! state update :expanded-nested
+           (fn [s] (if (contains? s nested-id)
+                     (disj s nested-id)
+                     (conj (or s #{}) nested-id))))
+    (reflow!)
+    (animate-to-fit!)))
+
+(defn double-tap-node!
+  "Toggle between fit-to-single-node (:solo) and fit-to-everything (:all).
+   First double-tap zooms onto that card; second double-tap anywhere zooms
+   back out. Any other user-initiated camera move resets to :all, so the
+   next double-tap always enters solo cleanly."
+  [fn-id]
+  (when (and fn-id (contains? (:shown @state) fn-id))
+    (if (= :solo (:fit-mode @state))
+      (animate-to-fit!)
+      (do
+        (swap! state assoc :fit-mode :solo)
+        (animate-to-node! fn-id)))))
+
 ;; --- Init -----------------------------------------------------------------
 
 (defn init-graph! [graph]
@@ -289,6 +353,11 @@
                    (js/console.warn "alon: duplicate node ids — graph will be ambiguous"
                                     (clj->js (vec dup-ids))))
         by-id    (into {} (map (juxt :id identity)) nodes)
+        children-of (reduce (fn [m n]
+                              (if-let [p (:parentId n)]
+                                (update m p (fnil conj []) (:id n))
+                                m))
+                            {} nodes)
         lifted   (vec (rewrite-edges by-id (:edges graph)))
         edges-by-from (reduce (fn [m e] (update m (:from e) (fnil conj []) e))
                               {} lifted)
@@ -303,24 +372,27 @@
                            nodes)
                      (some #(when (renderable? by-id (:id %)) (:id %)) nodes))]
     (swap! state assoc
-           :graph         graph
-           :by-id         by-id
-           :edges-by-from edges-by-from
-           :width-by-id   widths
-           :height-by-id  {}
-           :shown         (if start-id {start-id {:x 0 :y 0 :opened-by nil :root? true}} {})
-           :focused       start-id
-           :trail         []
-           :pan-x         0
-           :pan-y         0
-           :zoom          1)))
+           :graph           graph
+           :by-id           by-id
+           :children-of     children-of
+           :edges-by-from   edges-by-from
+           :width-by-id     widths
+           :height-by-id    {}
+           :shown           (if start-id {start-id {:x 0 :y 0 :opened-by nil :root? true}} {})
+           :expanded-nested #{}
+           :fit-mode        :all
+           :focused         start-id
+           :trail           []
+           :pan-x           0
+           :pan-y           0
+           :zoom            1)))
 
 (defn set-pan! [x y]
-  (swap! state assoc :pan-x x :pan-y y))
+  (swap! state assoc :pan-x x :pan-y y :fit-mode :all))
 
 (defn set-zoom! [z px py]
   (let [{:keys [pan-x pan-y zoom]} @state
         ratio  (/ z zoom)
         new-px (+ (* px (- 1 ratio)) (* ratio pan-x))
         new-py (+ (* py (- 1 ratio)) (* ratio pan-y))]
-    (swap! state assoc :zoom z :pan-x new-px :pan-y new-py)))
+    (swap! state assoc :zoom z :pan-x new-px :pan-y new-py :fit-mode :all)))

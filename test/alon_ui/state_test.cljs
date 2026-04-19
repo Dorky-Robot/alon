@@ -4,8 +4,9 @@
 
 (defn- install-graph! [graph]
   (reset! state/state
-          {:graph nil :by-id {} :edges-by-from {} :width-by-id {}
-           :height-by-id {} :shown {} :focused nil :trail []
+          {:graph nil :by-id {} :children-of {} :edges-by-from {} :width-by-id {}
+           :height-by-id {} :shown {} :expanded-nested #{} :fit-mode :all
+           :focused nil :trail []
            :pan-x 0 :pan-y 0 :zoom 1})
   (state/init-graph! graph))
 
@@ -99,3 +100,63 @@
   (state/dismiss! "a/helper")
   (is (= "a/outer" (:focused @state/state))
       "dismissing the focused box refocuses its opener so the trail stays coherent"))
+
+(deftest init-graph-starts-all-nested-collapsed
+  (install-graph! sample-graph)
+  (is (= #{} (:expanded-nested @state/state))
+      "fresh graph: every nested fn starts collapsed, Xcode-style"))
+
+(deftest init-graph-builds-children-of-index
+  (install-graph! sample-graph)
+  (let [kids (get-in @state/state [:children-of "a/outer"])]
+    (is (some #(= % "a/nested") kids)
+        ":children-of must point outer at its nested ObjectMethod child")))
+
+(deftest toggle-nested-flips-membership
+  (install-graph! sample-graph)
+  (state/toggle-nested! "a/nested")
+  (is (contains? (:expanded-nested @state/state) "a/nested")
+      "first toggle expands the nested")
+  (state/toggle-nested! "a/nested")
+  (is (not (contains? (:expanded-nested @state/state) "a/nested"))
+      "second toggle collapses it back"))
+
+;; ---- double-tap zoom toggle ---------------------------------------------
+
+(deftest init-graph-starts-in-fit-all-mode
+  (install-graph! sample-graph)
+  (is (= :all (:fit-mode @state/state))
+      "a freshly loaded graph begins in fit-all camera mode"))
+
+(deftest double-tap-from-all-enters-solo
+  (install-graph! sample-graph)
+  (state/double-tap-node! "a/outer")
+  (is (= :solo (:fit-mode @state/state))
+      "first double-tap from :all mode enters :solo so the next one exits"))
+
+(deftest double-tap-from-solo-exits-to-all
+  (install-graph! sample-graph)
+  (swap! state/state assoc :fit-mode :solo)
+  (state/double-tap-node! "a/outer")
+  (is (= :all (:fit-mode @state/state))
+      "second double-tap reverts :solo → :all by routing through animate-to-fit!"))
+
+(deftest double-tap-ignores-unshown-nodes
+  (install-graph! sample-graph)
+  (state/double-tap-node! "a/sink")
+  (is (= :all (:fit-mode @state/state))
+      "double-tapping a fn-id that isn't on the canvas is a no-op"))
+
+(deftest pan-resets-fit-mode
+  (install-graph! sample-graph)
+  (swap! state/state assoc :fit-mode :solo)
+  (state/set-pan! 42 42)
+  (is (= :all (:fit-mode @state/state))
+      "any user-initiated pan should exit :solo so the next double-tap re-enters it"))
+
+(deftest zoom-resets-fit-mode
+  (install-graph! sample-graph)
+  (swap! state/state assoc :fit-mode :solo)
+  (state/set-zoom! 1.2 0 0)
+  (is (= :all (:fit-mode @state/state))
+      "any user-initiated zoom should also exit :solo"))

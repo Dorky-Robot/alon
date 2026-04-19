@@ -1,12 +1,18 @@
 (ns alon-ui.file-card
   (:require [alon-ui.state :as state]
+            [alon-ui.highlight :as hi]
             [reagent.core :as r]
             [clojure.string :as str]))
 
 ;; Each card renders ONE function's source. Outbound call edges whose target
 ;; is resolvable are spliced into the source as clickable blue spans — click
-;; a call to spawn a new box for the callee. Unresolved calls stay as plain
-;; text since clicking them would do nothing.
+;; a call to spawn a new box for the callee.
+;;
+;; Nested function/method declarations inside the body collapse to a single
+;; `signature { … }` pill by default, Xcode-style — click to expand, click
+;; again to collapse. Each nested carries its own disclosure state; expanding
+;; a parent does NOT auto-expand its children. Call-links inside collapsed
+;; nesteds are hidden (no visible span) and their arrows anchor on the pill.
 
 (def CARD-WIDTH      320)
 (def ROW-H           34)
@@ -19,9 +25,14 @@
 (defn width-for [fn-id]
   (or (get-in @state/state [:width-by-id fn-id]) CARD-WIDTH))
 
+(defn- count-newlines [s]
+  (if (string? s)
+    (count (filter #(= % \newline) s))
+    0))
+
 (defn- line-count [s]
   (if (string? s)
-    (inc (count (filter #(= % \newline) s)))
+    (inc (count-newlines s))
     0))
 
 (defn source-height
@@ -32,58 +43,230 @@
     (+ SOURCE-PAD-TOP (* (line-count s) LINE-H) SOURCE-PAD-BOT)
     0))
 
-(defn splice-calls
-  "Walk `src` and interleave outbound call edges as clickable spans. For
-   each edge (sorted by offsetStart) we emit:
-     {:kind :text :text \"…\"}         raw source before the next call
-     {:kind :call :edge e :text \"…\"}  the call expression itself
-   Overlapping edges (a call nested inside another call's range) are
-   skipped — whichever span renders first wins, so `foo(bar())` shows
-   the outer `foo` as the clickable link."
-  [src edges]
-  (if-not (string? src)
-    []
-    (let [sorted (sort-by :offsetStart edges)
-          n      (count src)]
-      (loop [es sorted, cur 0, acc []]
-        (if-let [e (first es)]
-          (let [os (:offsetStart e)
-                oe (:offsetEnd   e)]
-            (if (or (< os cur) (nil? os) (nil? oe))
-              (recur (rest es) cur acc)
-              (let [c-os (min os n)
-                    c-oe (min oe n)
-                    before (subs src cur c-os)
-                    call   (subs src c-os c-oe)]
-                (recur (rest es) c-oe
-                       (cond-> acc
-                         (pos? (count before)) (conj {:kind :text :text before})
-                         (pos? (count call))   (conj {:kind :call :edge e :text call}))))))
-          (let [tail (subs src (min cur n))]
-            (cond-> acc
-              (pos? (count tail)) (conj {:kind :text :text tail}))))))))
+;; --- Plan building -------------------------------------------------------
+;;
+;; plan-for walks a renderable function's source and produces a flat
+;; segment sequence in display order. Each segment carries its source-local
+;; [os, oe) range plus the :line-start at which its first character
+;; displays. Collapsed nesteds replace their body range with a one-line
+;; pill, compressing the display; expanded nesteds are transparent — their
+;; body text and any call-sites inside pass through as regular segments,
+;; and their own descendants still start collapsed until clicked.
 
-(defn- offset->line-col
-  "Return [line-index col-index] of character `offset` within `src`."
-  [src offset]
-  (let [before  (subs src 0 (min offset (count src)))
-        nls     (count (filter #(= % \newline) before))
-        last-nl (str/last-index-of before "\n")
-        col     (if last-nl
-                  (- offset last-nl 1)
-                  offset)]
-    [nls col]))
+(defn- fn-like? [node]
+  (and node (#{"function" "method"} (:type node))))
+
+(defn- visible-nested-kids
+  "All nested fn/method descendants of `renderable-id` that should appear
+   in its plan. Collapsed ones emit as a `foo() { … }` pill; expanded ones
+   emit a zero-length ▾ expander at their start so users can re-collapse.
+   Expanded nesteds are otherwise transparent — we descend into them so
+   grand-descendants also get their own pill/expander segments."
+  [by-id children-of expanded-set renderable-id R-start]
+  (letfn [(walk [acc node-id]
+            (reduce
+             (fn [acc cid]
+               (let [child (get by-id cid)]
+                 (if (fn-like? child)
+                   (let [expanded? (contains? expanded-set cid)
+                         seg {:node child
+                              :os (- (:start child) R-start)
+                              :oe (- (:end   child) R-start)
+                              :collapsed? (not expanded?)}
+                         acc' (conj acc seg)]
+                     (if expanded? (walk acc' cid) acc'))
+                   acc)))
+             acc
+             (get children-of node-id [])))]
+    (walk [] renderable-id)))
+
+(defn- nested-sig
+  "One-line pill text for a collapsed nested. Takes the prefix up to the
+   first `{` in the nested's source, whitespace-collapses it, and appends
+   ` { … }`. Falls back to the nested's name if we can't find a brace."
+  [node R-source os oe]
+  (let [body  (subs R-source os (min oe (count R-source)))
+        brace (str/index-of body "{")
+        prefix (if brace
+                 (subs body 0 brace)
+                 (or (:name node) "fn"))
+        one-line (-> prefix
+                     (str/replace #"\s+" " ")
+                     str/trim)]
+    (str one-line " { … }")))
+
+(defn- advance-by [line text]
+  (+ line (count-newlines text)))
+
+(defn plan-for
+  "Build a segment plan for rendering renderable R's source given call
+   edges (already lifted to R-local offsets) and its nested descendants.
+
+   Returns a vector of segments, each with:
+     :kind       :text | :call | :nested-collapsed | :nested-expander
+     :os :oe     source-local offsets (R-source coords)
+     :text       display text
+     :line-start display-line index of the segment's first char
+   :call adds :edge; :nested-* add :node.
+
+   :nested-expander is zero-length (:os == :oe) and renders as a clickable
+   ▾ glyph just before an expanded nested's signature — clicking it collapses
+   the block back to its pill form, IDE-fold style."
+  [R-source edges nested-kids]
+  (if-not (string? R-source)
+    []
+    (let [collapsed-ranges (for [k nested-kids :when (:collapsed? k)]
+                             [(:os k) (:oe k)])
+          inside-collapsed? (fn [o]
+                              (some (fn [[ns ne]] (and (<= ns o) (< o ne)))
+                                    collapsed-ranges))
+          call-cands (for [e edges
+                           :let [os (:offsetStart e)
+                                 oe (:offsetEnd   e)]
+                           :when (and os oe
+                                      (<= 0 os) (<= oe (count R-source))
+                                      (< os oe)
+                                      (not (inside-collapsed? os)))]
+                       {:kind :call :os os :oe oe :edge e})
+          nested-cands (for [{:keys [node os oe collapsed?]} nested-kids
+                             :when (and os oe (<= 0 os) (< os oe)
+                                        (<= oe (count R-source)))]
+                         (if collapsed?
+                           {:kind :nested-collapsed :os os :oe oe :node node}
+                           ;; Zero-length: the body passes through as text/calls
+                           ;; and the ▾ sits just before the `function` keyword.
+                           {:kind :nested-expander  :os os :oe os :node node}))
+          candidates (vec (sort-by :os (concat nested-cands call-cands)))
+          len        (count R-source)]
+      (loop [cs candidates, cur 0, line 0, acc []]
+        (if-let [c (first cs)]
+          (let [os (:os c), oe (:oe c)]
+            (if (< os cur)
+              ;; Overlap with an already-emitted segment — drop this candidate.
+              (recur (rest cs) cur line acc)
+              (let [before (subs R-source cur os)
+                    acc1   (if (pos? (count before))
+                             (conj acc {:kind :text :os cur :oe os
+                                        :text before :line-start line})
+                             acc)
+                    line1  (advance-by line before)
+                    seg (case (:kind c)
+                          :call
+                          {:kind :call :os os :oe oe :edge (:edge c)
+                           :text (subs R-source os oe)
+                           :line-start line1}
+                          :nested-collapsed
+                          {:kind :nested-collapsed :os os :oe oe :node (:node c)
+                           :text (nested-sig (:node c) R-source os oe)
+                           :line-start line1}
+                          :nested-expander
+                          {:kind :nested-expander :os os :oe os :node (:node c)
+                           :text "▾" :line-start line1})
+                    ;; Advance: collapsed pills compress multi-line body into
+                    ;; one display line; expanders are zero-width (no advance).
+                    line2 (advance-by line1 (:text seg))]
+                (recur (rest cs) oe line2 (conj acc1 seg)))))
+          (let [tail (subs R-source cur len)]
+            (cond-> acc
+              (pos? (count tail))
+              (conj {:kind :text :os cur :oe len
+                     :text tail :line-start line}))))))))
+
+(defn- compute-plan
+  "Collect what plan-for needs for a renderable fn-id from the current
+   app state."
+  [s fn-id]
+  (when-let [node (get-in s [:by-id fn-id])]
+    (let [edges       (get-in s [:edges-by-from fn-id] [])
+          nested-kids (visible-nested-kids (:by-id s)
+                                           (:children-of s)
+                                           (or (:expanded-nested s) #{})
+                                           fn-id
+                                           (:start node))]
+      (plan-for (:source node) edges nested-kids))))
+
+(defn- seg-containing [plan offset]
+  (some (fn [seg]
+          (when (and (<= (:os seg) offset) (< offset (:oe seg)))
+            seg))
+        plan))
 
 (defn call-site-y
   "Absolute y (in canvas coords) of the call at `offset` inside `fn-id`'s
-   box. Sits on the vertical center of the source line containing it."
+   box. Uses the current plan so collapsed nesteds don't throw off the
+   line math — a call-site inside a collapsed nested anchors on the pill."
   [fn-id offset]
-  (let [{:keys [by-id shown]} @state/state
-        node (get by-id fn-id)
-        pos  (get shown fn-id)]
-    (when (and node pos (:source node) offset)
-      (let [[nls _] (offset->line-col (:source node) offset)]
-        (+ (:y pos) ROW-H SOURCE-PAD-TOP (* nls LINE-H) (/ LINE-H 2))))))
+  (let [s   @state/state
+        pos (get-in s [:shown fn-id])]
+    (when (and pos offset)
+      (when-let [plan (compute-plan s fn-id)]
+        (let [seg (seg-containing plan offset)
+              line (cond
+                     (nil? seg) 0
+                     (= :text (:kind seg))
+                     (+ (:line-start seg)
+                        (count-newlines
+                         (subs (:text seg) 0
+                               (min (- offset (:os seg))
+                                    (count (:text seg))))))
+                     :else (:line-start seg))]
+          (+ (:y pos) ROW-H SOURCE-PAD-TOP (* line LINE-H) (/ LINE-H 2)))))))
+
+;; --- Render --------------------------------------------------------------
+
+(defn- tokenized-spans
+  "Render plain source text as per-token spans so the stylesheet can paint
+   keywords/strings/etc. Whitespace runs come back as one :class nil span,
+   so this doesn't explode into one element per character."
+  [text key-prefix]
+  (map-indexed
+   (fn [i t]
+     ^{:key (str key-prefix "-" i)}
+     [:span (when (:class t) {:class (str "tok-" (name (:class t)))})
+      (:text t)])
+   (hi/tokenize text)))
+
+(defn- render-segment [from-id s i seg]
+  (case (:kind seg)
+    :text
+    (tokenized-spans (:text seg) (str "t" i))
+
+    :call
+    (let [to-id  (:to (:edge seg))
+          callee (get-in s [:by-id to-id])]
+      [^{:key (str "c" i)}
+       [:span.call
+        {:title (str "spawn " (:name callee))
+         :on-mouse-down    (fn [e] (.stopPropagation e))
+         :on-double-click  (fn [e] (.stopPropagation e))
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/spawn-call! from-id to-id))}
+        (:text seg)]])
+
+    :nested-collapsed
+    (let [n (:node seg)]
+      [^{:key (str "n" i)}
+       [:span.nested-collapsed
+        {:title (str "expand " (:name n))
+         :on-mouse-down    (fn [e] (.stopPropagation e))
+         :on-double-click  (fn [e] (.stopPropagation e))
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/toggle-nested! (:id n)))}
+        (:text seg)]])
+
+    :nested-expander
+    (let [n (:node seg)]
+      [^{:key (str "e" i)}
+       [:span.nested-expander
+        {:title (str "collapse " (:name n))
+         :on-mouse-down    (fn [e] (.stopPropagation e))
+         :on-double-click  (fn [e] (.stopPropagation e))
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/toggle-nested! (:id n)))}
+        (:text seg)]])))
 
 (defn fn-card [fn-id]
   (let [drag-state (r/atom nil)
@@ -122,8 +305,7 @@
               pos        (get-in s [:shown fn-id])
               focused?   (= fn-id (:focused s))
               trail?     (some #(= % fn-id) (:trail s))
-              edges-out  (get-in s [:edges-by-from fn-id] [])
-              segs       (splice-calls (:source node) edges-out)
+              plan       (compute-plan s fn-id)
               dragging?  (some? @drag-state)
               start-drag (fn [e]
                            (when (zero? (.-button e))
@@ -142,7 +324,10 @@
                      trail?       (conj "trail")
                      dragging?    (conj "dragging"))
             :ref   (fn [el] (reset! el-ref el))
-            :style {:left (:x pos) :top (:y pos) :width (width-for fn-id)}}
+            :style {:left (:x pos) :top (:y pos) :width (width-for fn-id)}
+            :on-double-click (fn [e]
+                               (.stopPropagation e)
+                               (state/double-tap-node! fn-id))}
            [:div.card
             [:div.row
              [:div.row-head
@@ -151,25 +336,17 @@
               [:span.name (or (:signature node) (:name node))]]
              (when (:source node)
                (into [:pre.source
-                      {:on-mouse-down (fn [e] (.stopPropagation e))}]
-                     (map-indexed
-                      (fn [i seg]
-                        (case (:kind seg)
-                          :text ^{:key i} [:span (:text seg)]
-                          :call ^{:key i}
-                          [:span.call
-                           {:title (str "spawn " (:name (get-in s [:by-id (:to (:edge seg))])))
-                            :on-mouse-down (fn [e] (.stopPropagation e))
-                            :on-click (fn [e]
-                                        (.stopPropagation e)
-                                        (state/spawn-call! fn-id (:to (:edge seg))))}
-                           (:text seg)]))
-                      segs)))]]
+                      {:on-mouse-down (fn [e] (.stopPropagation e))
+                       ;; Let native dblclick = word-select work inside source.
+                       :on-double-click (fn [e] (.stopPropagation e))}]
+                     (mapcat (fn [i seg] (render-segment fn-id s i seg))
+                             (range) plan)))]]
            (when-not (:root? pos)
              [:div.path
               {:on-mouse-down start-drag}
               [:span.dismiss
                {:title "dismiss this box (and everything it spawned)"
+                :on-double-click (fn [e] (.stopPropagation e))
                 :on-mouse-down (fn [e]
                                  (.stopPropagation e)
                                  (state/dismiss! fn-id))}
