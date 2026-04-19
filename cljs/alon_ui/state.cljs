@@ -121,6 +121,10 @@
 
 (defn init-graph! [graph]
   (let [nodes    (:nodes graph)
+        dup-ids  (->> nodes (map :id) frequencies (filter #(> (val %) 1)) (map key))
+        _        (when (seq dup-ids)
+                   (js/console.warn "alon: duplicate node ids — graph will be ambiguous"
+                                    (clj->js (vec dup-ids))))
         by-id    (into {} (map (juxt :id identity)) nodes)
         trace    (compute-trace-order graph)
         edges    (:edges graph)

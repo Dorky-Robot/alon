@@ -8,8 +8,12 @@ import _traverse from '@babel/traverse';
 
 const traverse = _traverse.default || _traverse;
 
-export function parseFile(filePath, code) {
+export function parseFile(filePath, code, rootDir) {
   const ext = path.extname(filePath);
+  // Qualify ids with the path relative to the entry file's directory so
+  // that two files sharing a basename (e.g. a/index.js and b/index.js)
+  // can't collide into a single node.
+  const relPath = rootDir ? path.relative(rootDir, filePath) : filePath;
   const ast = parse(code, {
     sourceType: 'module',
     plugins: [
@@ -24,8 +28,7 @@ export function parseFile(filePath, code) {
   const importBindings = new Map();
   const fnNodeToId = new WeakMap();
 
-  const nodeId = (name, line) =>
-    `${path.basename(filePath)}:${name}@${line}`;
+  const nodeId = (name, line) => `${relPath}:${name}@${line}`;
 
   function nearestCapturedAncestor(p) {
     let cur = p.getFunctionParent();
@@ -124,9 +127,11 @@ export function collectCalls(file, allFiles) {
     const target = allFiles.get(binding.resolvedFile);
     if (!target) return null;
     if (binding.imported === 'default') {
-      // No exports tracking yet — fall back to the file's first function.
-      const fn = target.nodes.find(n => n.type === 'function');
-      return fn ? fn.id : null;
+      // No exports tracking yet. A "first function in file" guess would
+      // silently misattribute the edge when the default export isn't the
+      // first declared function, which is worse than no edge — a wrong
+      // arrow looks identical to a verified one. Drop the edge instead.
+      return null;
     }
     return target.declared.get(binding.imported) || null;
   }

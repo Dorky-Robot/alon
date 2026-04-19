@@ -10,6 +10,7 @@ import { resolveLocal } from './resolve.mjs';
 import { parseFile, collectCalls } from './visitors.mjs';
 
 async function buildGraph(entryFile) {
+  const rootDir = path.dirname(entryFile);
   const queue = [entryFile];
   const allFiles = new Map();
 
@@ -17,7 +18,7 @@ async function buildGraph(entryFile) {
     const file = queue.shift();
     if (allFiles.has(file)) continue;
     const code = await fs.readFile(file, 'utf8');
-    const rec = parseFile(file, code);
+    const rec = parseFile(file, code, rootDir);
     allFiles.set(file, rec);
 
     // Resolve each import binding's spec to an absolute file path so the

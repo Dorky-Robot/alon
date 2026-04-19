@@ -31,9 +31,17 @@
     :else p))
 
 (defn- file-response [root rel-path]
-  (let [safe (str/replace rel-path #"\.\.+" ".")
-        abs  (fs/path root (subs safe 1))]
-    (if (and (fs/exists? abs) (fs/regular-file? abs))
+  (let [safe    (str/replace rel-path #"\.\.+" ".")
+        abs     (fs/path root (subs safe 1))
+        ;; Resolve symlinks + normalize then verify containment under root.
+        ;; Defense-in-depth: the regex above already collapses `..` runs, but
+        ;; relying on that alone makes traversal one proxy-decode away from
+        ;; being broken again.
+        root-real (str (fs/real-path root))
+        real    (when (fs/exists? abs) (str (fs/real-path abs)))]
+    (if (and real
+             (fs/regular-file? abs)
+             (str/starts-with? real (str root-real java.io.File/separator)))
       {:status  200
        :headers {"content-type"  (or (MIME (ext (str abs))) "application/octet-stream")
                  ;; Dev tool — never serve stale cljs/js from browser cache.
@@ -78,5 +86,7 @@
     ;; Fail fast if the entry can't be analyzed at boot.
     (analyzer/analyze root entry)
     (when-let [stop @server] (stop))
-    (reset! server (http/run-server #(handler root entry %) {:port port}))
+    ;; Bind loopback only — the graph injects analyzed source into the page,
+    ;; so a default-all-interfaces bind would leak source over LAN Wi-Fi.
+    (reset! server (http/run-server #(handler root entry %) {:port port :ip "127.0.0.1"}))
     {:port port :root root}))
