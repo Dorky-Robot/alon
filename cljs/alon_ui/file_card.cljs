@@ -86,6 +86,27 @@
 (defn row-y-center [node-id]
   (+ (row-top-y node-id) (/ ROW-H 2)))
 
+(defn- source-line-y
+  "Vertical center (within a source block) of the line that contains
+   character `offset`."
+  [src offset]
+  (let [before (subs src 0 (min offset (count src)))
+        nls    (count (filter #(= % \newline) before))]
+    (+ SOURCE-PAD-TOP (* nls LINE-H) (/ LINE-H 2))))
+
+(defn call-site-y
+  "Absolute y of a call-site at `offset` within `node-id`'s card. Only
+   meaningful for an expanded leaf — a container shows child rows instead
+   of source, so there's no line to anchor to."
+  [node-id offset]
+  (let [{:keys [by-id expanded children-of]} @state/state
+        node  (get by-id node-id)
+        leaf? (empty? (get children-of node-id))
+        open? (contains? expanded node-id)]
+    (when (and open? leaf? (:source node) offset)
+      (+ (row-top-y node-id) ROW-H
+         (source-line-y (:source node) offset)))))
+
 (defn row-depth
   "How many captured-fn ancestors `node-id` has. Top-level = 0."
   [node-id]
@@ -114,14 +135,18 @@
    captured children render in container mode (children as nested rows);
    leaves render their source."
   [start-drag node]
-  (let [{:keys [expanded]} @state/state
+  (let [{:keys [expanded focused trail]} @state/state
         {:keys [id name type source]} node
         open?     (contains? expanded id)
         kids      (when open? (ordered-children id))
-        has-kids? (seq kids)]
+        has-kids? (seq kids)
+        focused?  (= id focused)
+        trail?    (some #(= % id) trail)]
     [:div.row {:class (cond-> []
                         open?     (conj "expanded")
-                        has-kids? (conj "container"))}
+                        has-kids? (conj "container")
+                        focused?  (conj "focused")
+                        trail?    (conj "trail"))}
      [:div.row-head
       {:on-mouse-down (fn [e] (start-drag id e))}
       [:span.kind type]
@@ -152,8 +177,7 @@
                      (let [d @drag-state]
                        (reset! drag-state nil)
                        (when (and d (not (:moved? d)) (:click-id d))
-                         (state/toggle-expanded! (:click-id d))
-                         (state/expand-node!     (:click-id d)))))]
+                         (state/focus! (:click-id d)))))]
     (r/create-class
      {:component-did-mount
       (fn [_]
@@ -190,4 +214,10 @@
                    ^{:key (:id n)} [row start-drag n]))
            [:div.path
             {:on-mouse-down (fn [e] (start-drag nil e))}
+            [:span.dismiss
+             {:title "dismiss this file (and everything it brought in)"
+              :on-mouse-down (fn [e]
+                               (.stopPropagation e)
+                               (state/dismiss-file! file))}
+             "×"]
             (short-path file)]]))})))

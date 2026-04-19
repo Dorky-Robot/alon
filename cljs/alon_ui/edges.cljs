@@ -40,8 +40,10 @@
   "Compute endpoint {:x :y :right?} for `node-id` relative to `other-center-x`.
    In container mode, nested rows live inset from the file-card edge by
    their depth × CONTAINER-PAD on each side, so anchor at that nested edge
-   instead of the outer file-card border."
-  [node-id other-center-x]
+   instead of the outer file-card border. If `offset` is provided and the
+   node's source is actually rendered (expanded leaf, not collapsed/container),
+   anchor to that call-site line instead of the row-head center."
+  [node-id other-center-x & [offset]]
   (let [s @state/state
         vis-id (nearest-visible-id s node-id)
         n      (get-in s [:by-id vis-id])]
@@ -54,7 +56,9 @@
               row-center (/ (+ row-left row-right) 2)
               right?     (>= other-center-x row-center)
               x          (if right? row-right row-left)
-              y-local    (fc/row-y-center vis-id)]
+              call-y     (when (and offset (= vis-id node-id))
+                           (fc/call-site-y node-id offset))
+              y-local    (or call-y (fc/row-y-center vis-id))]
           {:x x :y (+ (:y pos) y-local) :right? right?})))))
 
 (defn- bezier [ax ay a-right? bx by b-right?]
@@ -77,7 +81,7 @@
                 :orient "auto-start-reverse"}
        [:path {:d "M 0 0 L 10 5 L 0 10 z"
                :fill "#5a8aff" :opacity 0.9}]]]
-     (for [{:keys [from to type]} (get-in s [:graph :edges])
+     (for [{:keys [from to type offsetStart]} (get-in s [:graph :edges])
            :let [fn'  (get-in s [:by-id from])
                  tn   (get-in s [:by-id to])
                  fpos (get-in s [:shown (:file fn')])
@@ -90,7 +94,7 @@
                       (not (ancestor? s to from)))
            :let [t-cx (+ (:x tpos) (/ (fc/width-for (:file tn)) 2))
                  f-cx (+ (:x fpos) (/ (fc/width-for (:file fn')) 2))
-                 a (anchor from t-cx)
+                 a (anchor from t-cx offsetStart)
                  b (anchor to   f-cx)]
            :when (and a b)]
        ^{:key (str from "→" to)}

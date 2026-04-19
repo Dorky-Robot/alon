@@ -47,6 +47,8 @@
         (min MAX-WIDTH)
         int)))
 
+(declare focus!)
+
 (defonce state
   (r/atom {:graph         nil
            :by-id         {}
@@ -56,6 +58,8 @@
            :edges-by-from {}
            :shown         {}
            :expanded      #{}
+           :focused       nil
+           :trail         []
            :pan-x         0
            :pan-y         0
            :zoom          1}))
@@ -159,40 +163,16 @@
            :shown         (if start-file
                             {start-file {:x 0 :y 0 :root? true}}
                             {})
-           :expanded      #{})))
-
-(defn- node-neighbor-files [node-id]
-  (let [{:keys [graph by-id]} @state]
-    (into #{}
-          (comp
-           (keep (fn [{:keys [from to]}]
-                   (cond (= from node-id) to
-                         (= to node-id)   from)))
-           (keep #(get by-id %))
-           (map :file))
-          (:edges graph))))
-
-(defn expand-node!
-  "Bring in file cards for every file that holds a neighbor of `node-id`."
-  [node-id]
-  (let [{:keys [shown by-id]} @state
-        home    (some-> (get by-id node-id) :file)
-        center  (get shown home)
-        targets (->> (node-neighbor-files node-id)
-                     (remove #(= % home))
-                     (remove #(contains? shown %))
-                     vec)]
-    (when (and center (seq targets))
-      (let [step (/ (* 2 Math/PI) (count targets))
-            dist 560
-            placed (into {}
-                         (map-indexed
-                          (fn [i f]
-                            (let [angle (- (* i step) (/ Math/PI 2))]
-                              [f {:x (+ (:x center) (* (Math/cos angle) dist))
-                                  :y (+ (:y center) (* (Math/sin angle) dist))}]))
-                          targets))]
-        (swap! state update :shown merge placed)))))
+           :expanded      #{}
+           :focused       nil
+           :trail         [])
+    ;; Auto-focus the first top-level function in the entry file so the
+    ;; canvas boots in navigation mode instead of an empty "pick a row"
+    ;; state. Its source + call-site arrows come in for free.
+    (let [start-focus (or (some #(when (= (:type %) "function") (:id %))
+                                (get top-by-file start-file))
+                          (:id (first (get top-by-file start-file))))]
+      (when start-focus (focus! start-focus)))))
 
 (defn move-card! [file-path dx dy origin-x origin-y]
   (swap! state update-in [:shown file-path]
@@ -204,6 +184,259 @@
 (defn toggle-expanded! [node-id]
   (swap! state update :expanded
          (fn [e] (if (contains? e node-id) (disj e node-id) (conj e node-id)))))
+
+(defn- ancestor-chain
+  "Walk `node-id` and every :parentId up to the top, inclusive."
+  [by-id node-id]
+  (take-while some? (iterate #(:parentId (get by-id %)) node-id)))
+
+;; --- Layout ---------------------------------------------------------------
+;;
+;; Three lanes around the focused file:
+;;   left   = files holding callers of focused
+;;   center = focused's own file
+;;   right  = files holding callees of focused
+;; Cards are laid out as columns, each column stack-centered vertically.
+;; This replaces the old polar fan, which scattered cards around a circle.
+
+(def ^:private CARD-PATH-PAD     30)   ; path label + spacing below the card
+(def ^:private CARD-ROW-EST      36)   ; row-head height + border per top row
+(def ^:private CARD-EXPAND-EST   220)  ; rough body height per expanded row in this file
+(def ^:private CARD-COL-GAP      120)  ; horizontal gap between columns
+(def ^:private CARD-STACK-GAP    60)   ; vertical gap between cards in one column
+
+(defn- card-height-est
+  "Rough height for a file card given current expansion. Doesn't need to be
+   exact — the column layout uses it only to space cards apart so they
+   don't pile on top of each other. The DOM gets the real height."
+  [file]
+  (let [s @state
+        tops (get-in s [:by-file file] [])
+        expanded-here (->> (vals (:by-id s))
+                           (filter #(and (= (:file %) file)
+                                         (contains? (:expanded s) (:id %))))
+                           count)]
+    (+ CARD-PATH-PAD
+       (* CARD-ROW-EST (count tops))
+       (* CARD-EXPAND-EST expanded-here))))
+
+(defn- neighbor-files
+  "Files holding nodes connected to `node-id` via edges in `direction`
+   (:out → callees, :in → callers). Excludes node-id's own file."
+  [node-id direction]
+  (let [s @state
+        {:keys [by-id graph]} s
+        home (some-> (get by-id node-id) :file)
+        pick (case direction
+               :out (fn [{:keys [from to]}] (when (= from node-id) to))
+               :in  (fn [{:keys [from to]}] (when (= to node-id)   from)))]
+    (->> (:edges graph)
+         (keep pick)
+         (keep #(:file (get by-id %)))
+         distinct
+         (remove #(= % home))
+         vec)))
+
+(defn- next-y-below-siblings
+  "Lowest free y in the column owned by `opener-file`. Stacks below any
+   existing card opened by the same file so siblings cascade downward
+   instead of overlapping."
+  [shown opener-file fallback-y]
+  (let [sibs (filter (fn [[_ pos]] (= (:opened-by pos) opener-file)) shown)]
+    (if (empty? sibs)
+      fallback-y
+      (apply max (map (fn [[f pos]]
+                        (+ (:y pos) (card-height-est f) CARD-STACK-GAP))
+                      sibs)))))
+
+(defn- add-card!
+  "Bring `file` onto the canvas if it isn't already there. Position is
+   anchored to its `opener-file` (the file the user was on when they
+   clicked through to this one) — same y to start, snapping below
+   previously-added siblings, in a column to the right of the opener.
+   Stamps :opened-by so cascade-dismissal can find descendants later."
+  [file opener-file]
+  (let [s @state]
+    (when (and file (not (contains? (:shown s) file)))
+      (let [opener-pos (when opener-file (get-in s [:shown opener-file]))
+            opener-w   (or (when opener-file
+                             (get-in s [:width-by-file opener-file]))
+                           0)
+            x (if opener-pos
+                (+ (:x opener-pos) opener-w CARD-COL-GAP)
+                0)
+            y (next-y-below-siblings (:shown s)
+                                     opener-file
+                                     (or (:y opener-pos) 0))]
+        (swap! state assoc-in [:shown file]
+               {:x x :y y
+                :opened-by opener-file
+                :root?     (nil? opener-file)})))))
+
+(defn- bring-in-around!
+  "Add the focused node's file (if new) and every callee/caller file of
+   the focused node (if new). Existing cards keep their position — the
+   user's mental map of where things live is preserved across navigation."
+  [focused-id prev-focused-id]
+  (let [s @state
+        {:keys [by-id]} s
+        focused-file (some-> (get by-id focused-id) :file)
+        prev-file    (some-> (get by-id prev-focused-id) :file)
+        opener       (when (and prev-file (not= prev-file focused-file))
+                       prev-file)]
+    (add-card! focused-file opener)
+    (doseq [f (concat (neighbor-files focused-id :out)
+                      (neighbor-files focused-id :in))]
+      (add-card! f focused-file))))
+
+(declare animate-to-fit!)
+
+(defn dismiss-file!
+  "Remove `file` and every card it transitively brought in. If the focused
+   row lived in a dismissed file, refocus to the dismissed file's opener
+   (or whichever card now sits at the top-left of the canvas)."
+  [file]
+  (let [s @state
+        {:keys [shown by-id focused]} s]
+    (when (contains? shown file)
+      (let [;; BFS the opened-by graph to find descendants (incl. `file`).
+            doomed (loop [acc #{file}, frontier [file]]
+                     (if (empty? frontier)
+                       acc
+                       (let [next-frontier
+                             (->> shown
+                                  (keep (fn [[f pos]]
+                                          (when (and (contains? (set frontier)
+                                                                (:opened-by pos))
+                                                     (not (contains? acc f)))
+                                            f))))]
+                         (recur (into acc next-frontier)
+                                (vec next-frontier)))))
+            new-shown (into {} (remove (fn [[f _]] (contains? doomed f))) shown)
+            ;; If we dismissed the focused's home, refocus to the
+            ;; dismissed file's opener (a survivor) or the first survivor.
+            focused-file (some-> (get by-id focused) :file)
+            new-focused
+            (if (contains? doomed focused-file)
+              (let [opener (:opened-by (get shown file))
+                    survivor (or (when (contains? new-shown opener) opener)
+                                 (first (keys new-shown)))
+                    by-file (:by-file s)]
+                (some-> (first (get by-file survivor)) :id))
+              focused)]
+        (swap! state assoc
+               :shown   new-shown
+               :focused new-focused
+               :trail   (vec (filter #(let [f (some-> (get by-id %) :file)]
+                                        (not (contains? doomed f)))
+                                     (:trail s))))
+        (animate-to-fit!)))))
+
+;; --- Camera tween ---------------------------------------------------------
+;;
+;; After a layout change we ease the canvas pan + zoom so every visible
+;; card fits the viewport. The canvas transform is
+;;   transform-origin: 0 0; translate(pan-x, pan-y) scale(zoom)
+;; positioned at left:50%/top:50%, so for a canvas-coords point (cx, cy)
+;; to land at viewport center, pan = -center * zoom.
+
+(defn- bbox-of-shown []
+  (let [s @state
+        rects (for [[f pos] (:shown s)]
+                (let [w (or (get-in s [:width-by-file f]) 320)
+                      h (card-height-est f)]
+                  [(:x pos) (:y pos)
+                   (+ (:x pos) w) (+ (:y pos) h)]))]
+    (when (seq rects)
+      (let [x1 (apply min (map #(nth % 0) rects))
+            y1 (apply min (map #(nth % 1) rects))
+            x2 (apply max (map #(nth % 2) rects))
+            y2 (apply max (map #(nth % 3) rects))]
+        {:cx (/ (+ x1 x2) 2) :cy (/ (+ y1 y2) 2)
+         :w  (- x2 x1)        :h  (- y2 y1)}))))
+
+(defn- ease-out-cubic [t] (- 1 (Math/pow (- 1 t) 3)))
+
+(defonce ^:private anim-token (atom 0))
+
+(defn animate-to!
+  "Tween :pan-x :pan-y :zoom toward (tx, ty, tz) over `duration-ms`. A
+   monotonic token cancels any in-flight animation when a new one starts,
+   so rapid focus changes don't fight each other."
+  [tx ty tz duration-ms]
+  (let [s  @state
+        sx (:pan-x s) sy (:pan-y s) sz (:zoom s)
+        t0 (.now js/performance)
+        token (swap! anim-token inc)]
+    (letfn [(step [_]
+              (when (= token @anim-token)
+                (let [t (min 1 (/ (- (.now js/performance) t0) duration-ms))
+                      e (ease-out-cubic t)]
+                  (swap! state assoc
+                         :pan-x (+ sx (* e (- tx sx)))
+                         :pan-y (+ sy (* e (- ty sy)))
+                         :zoom  (+ sz (* e (- tz sz))))
+                  (when (< t 1) (js/requestAnimationFrame step)))))]
+      (js/requestAnimationFrame step))))
+
+(defn animate-to-fit!
+  "Pan + zoom so the bounding box of all shown cards fits the viewport
+   with a comfortable margin. Caps zoom at 1× — we never enlarge past
+   actual size, since reading text at 1.5× looks blurry on hidpi."
+  ([] (animate-to-fit! 380))
+  ([duration-ms]
+   (when-let [bb (bbox-of-shown)]
+     (let [vw (.-innerWidth js/window)
+           vh (.-innerHeight js/window)
+           pad 100
+           tz (-> (min (/ (- vw (* 2 pad)) (max 1 (:w bb)))
+                       (/ (- vh (* 2 pad)) (max 1 (:h bb)))
+                       1.0)
+                  (max 0.2))
+           tx (- (* (:cx bb) tz))
+           ty (- (* (:cy bb) tz))]
+       (animate-to! tx ty tz duration-ms)))))
+
+(defn- ensure-focus-visible! [node-id prev-focused-id]
+  (let [s @state
+        {:keys [by-id]} s
+        node (get by-id node-id)]
+    (when node
+      (swap! state update :expanded
+             (fn [e] (into (or e #{}) (ancestor-chain by-id node-id))))
+      (bring-in-around! node-id prev-focused-id)
+      (animate-to-fit!))))
+
+(defn focus!
+  "Navigate to `node-id`.
+     - already focused: toggle its expansion (so re-clicking can collapse)
+     - in trail: jump back, truncating the trail just before it
+     - otherwise: promote, pushing old focused onto trail
+
+   New focuses accumulate cards (Wikipedia-style) — previously visited
+   files stay until the user dismisses them. Re-click on focused just
+   toggles expansion."
+  [node-id]
+  (let [{:keys [focused trail]} @state
+        prev-focused focused]
+    (cond
+      (nil? node-id) nil
+
+      (= node-id focused)
+      (toggle-expanded! node-id)
+
+      (some #(= % node-id) trail)
+      (let [i (first (keep-indexed (fn [i id] (when (= id node-id) i)) trail))]
+        (swap! state assoc
+               :focused node-id
+               :trail   (vec (subvec trail 0 i)))
+        (ensure-focus-visible! node-id prev-focused))
+
+      :else
+      (do (swap! state assoc
+                 :focused node-id
+                 :trail   (if focused (conj trail focused) trail))
+          (ensure-focus-visible! node-id prev-focused)))))
 
 (defn set-pan! [x y]
   (swap! state assoc :pan-x x :pan-y y))
