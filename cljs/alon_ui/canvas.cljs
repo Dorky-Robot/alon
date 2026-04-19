@@ -52,7 +52,12 @@
                      (str "translate(" pan-x "px," pan-y "px) scale(" zoom ")")}}
             [edges/edges]
             (for [file (keys shown)]
-              ^{:key file} [file-card/file-card file])]]))})))
+              ^{:key file} [file-card/file-card file])]
+           [:button.fit-btn
+            {:title "fit all cards to viewport"
+             :on-mouse-down (fn [e] (.stopPropagation e))
+             :on-click (fn [_] (state/animate-to-fit!))}
+            "fit"]]))})))
 
 (defn root []
   [viewport])

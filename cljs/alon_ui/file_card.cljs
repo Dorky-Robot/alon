@@ -166,6 +166,14 @@
 
 (defn file-card [file]
   (let [drag-state (r/atom nil)
+        el-ref     (atom nil)
+        ;; Measure the card's true rendered height and let state decide
+        ;; whether anything needs to reflow. offsetHeight is in unscaled
+        ;; CSS pixels even when an ancestor has a CSS transform, which is
+        ;; exactly the coordinate space our layout math works in.
+        measure!   (fn []
+                     (when-let [el @el-ref]
+                       (state/set-measured-height! file (.-offsetHeight el))))
         on-move    (fn [e]
                      (when-let [d @drag-state]
                        (let [dx (/ (- (.-clientX e) (:mouse-x d)) (:zoom d))
@@ -182,7 +190,10 @@
      {:component-did-mount
       (fn [_]
         (.addEventListener js/window "mousemove" on-move)
-        (.addEventListener js/window "mouseup"   on-up))
+        (.addEventListener js/window "mouseup"   on-up)
+        (measure!))
+      :component-did-update
+      (fn [_ _] (measure!))
       :component-will-unmount
       (fn [_]
         (.removeEventListener js/window "mousemove" on-move)
@@ -208,6 +219,7 @@
            {:class (cond-> []
                      (:root? pos) (conj "root")
                      dragging?    (conj "dragging"))
+            :ref   (fn [el] (reset! el-ref el))
             :style {:left (:x pos) :top (:y pos) :width (width-for file)}}
            (into [:div.card]
                  (for [n top-nodes]

@@ -50,19 +50,20 @@
 (declare focus!)
 
 (defonce state
-  (r/atom {:graph         nil
-           :by-id         {}
-           :by-file       {}
-           :children-of   {}
-           :width-by-file {}
-           :edges-by-from {}
-           :shown         {}
-           :expanded      #{}
-           :focused       nil
-           :trail         []
-           :pan-x         0
-           :pan-y         0
-           :zoom          1}))
+  (r/atom {:graph          nil
+           :by-id          {}
+           :by-file        {}
+           :children-of    {}
+           :width-by-file  {}
+           :height-by-file {}
+           :edges-by-from  {}
+           :shown          {}
+           :expanded       #{}
+           :focused        nil
+           :trail          []
+           :pan-x          0
+           :pan-y          0
+           :zoom           1}))
 
 (defn- compute-trace-order
   "DFS-visit index for each node, starting from nodes with no incoming edges
@@ -199,26 +200,31 @@
 ;; Cards are laid out as columns, each column stack-centered vertically.
 ;; This replaces the old polar fan, which scattered cards around a circle.
 
-(def ^:private CARD-PATH-PAD     30)   ; path label + spacing below the card
-(def ^:private CARD-ROW-EST      36)   ; row-head height + border per top row
-(def ^:private CARD-EXPAND-EST   220)  ; rough body height per expanded row in this file
 (def ^:private CARD-COL-GAP      120)  ; horizontal gap between columns
-(def ^:private CARD-STACK-GAP    60)   ; vertical gap between cards in one column
+(def ^:private CARD-STACK-GAP    40)   ; constant vertical gap between siblings
+(def ^:private CARD-FALLBACK-H   120)  ; pre-measurement placeholder height
 
 (defn- card-height-est
-  "Rough height for a file card given current expansion. Doesn't need to be
-   exact — the column layout uses it only to space cards apart so they
-   don't pile on top of each other. The DOM gets the real height."
+  "Real rendered height of a file card, measured from the DOM. Until the
+   card mounts we use a small fallback — the first render places cards at
+   estimated positions, then measurement kicks in and reflow snaps them
+   to tight, constant-gap rows."
   [file]
-  (let [s @state
-        tops (get-in s [:by-file file] [])
-        expanded-here (->> (vals (:by-id s))
-                           (filter #(and (= (:file %) file)
-                                         (contains? (:expanded s) (:id %))))
-                           count)]
-    (+ CARD-PATH-PAD
-       (* CARD-ROW-EST (count tops))
-       (* CARD-EXPAND-EST expanded-here))))
+  (or (get-in @state [:height-by-file file]) CARD-FALLBACK-H))
+
+(declare reflow! animate-to-fit!)
+
+(defn set-measured-height!
+  "Record a card's true offsetHeight. If the value actually changed we
+   reflow (siblings may need to shift) and re-fit the viewport. Identical
+   re-measurements are no-ops — that's what breaks the measure/reflow/
+   measure feedback loop."
+  [file h]
+  (let [cur (get-in @state [:height-by-file file])]
+    (when (and h (or (nil? cur) (not= (int cur) (int h))))
+      (swap! state assoc-in [:height-by-file file] h)
+      (reflow!)
+      (animate-to-fit!))))
 
 (defn- neighbor-files
   "Files holding nodes connected to `node-id` via edges in `direction`
@@ -238,11 +244,14 @@
          vec)))
 
 (defn- next-y-below-siblings
-  "Lowest free y in the column owned by `opener-file`. Stacks below any
-   existing card opened by the same file so siblings cascade downward
-   instead of overlapping."
-  [shown opener-file fallback-y]
-  (let [sibs (filter (fn [[_ pos]] (= (:opened-by pos) opener-file)) shown)]
+  "Lowest free y in the lane owned by (`opener-file`, `direction`). Cards
+   on different sides of the same opener don't share a stack — siblings
+   only cascade below others added on the same side."
+  [shown opener-file direction fallback-y]
+  (let [sibs (filter (fn [[_ pos]]
+                       (and (= (:opened-by pos) opener-file)
+                            (= (:direction pos) direction)))
+                     shown)]
     (if (empty? sibs)
       fallback-y
       (apply max (map (fn [[f pos]]
@@ -251,43 +260,116 @@
 
 (defn- add-card!
   "Bring `file` onto the canvas if it isn't already there. Position is
-   anchored to its `opener-file` (the file the user was on when they
-   clicked through to this one) — same y to start, snapping below
-   previously-added siblings, in a column to the right of the opener.
-   Stamps :opened-by so cascade-dismissal can find descendants later."
-  [file opener-file]
-  (let [s @state]
-    (when (and file (not (contains? (:shown s) file)))
-      (let [opener-pos (when opener-file (get-in s [:shown opener-file]))
-            opener-w   (or (when opener-file
-                             (get-in s [:width-by-file opener-file]))
-                           0)
-            x (if opener-pos
-                (+ (:x opener-pos) opener-w CARD-COL-GAP)
-                0)
-            y (next-y-below-siblings (:shown s)
-                                     opener-file
-                                     (or (:y opener-pos) 0))]
-        (swap! state assoc-in [:shown file]
-               {:x x :y y
-                :opened-by opener-file
-                :root?     (nil? opener-file)})))))
+   anchored to its `opener-file` and lane direction (:right for callees,
+   :left for callers). Same y as opener to start, snapping below previously-
+   added siblings on the same side. Stamps :opened-by so cascade-dismissal
+   can find descendants later."
+  ([file opener-file] (add-card! file opener-file :right))
+  ([file opener-file direction]
+   (let [s @state]
+     (when (and file (not (contains? (:shown s) file)))
+       (let [opener-pos (when opener-file (get-in s [:shown opener-file]))
+             opener-w   (or (when opener-file
+                              (get-in s [:width-by-file opener-file]))
+                            0)
+             new-w      (or (get-in s [:width-by-file file]) 320)
+             x (cond
+                 (nil? opener-pos) 0
+                 (= direction :left)
+                 (- (:x opener-pos) CARD-COL-GAP new-w)
+                 :else
+                 (+ (:x opener-pos) opener-w CARD-COL-GAP))
+             y (next-y-below-siblings (:shown s)
+                                      opener-file direction
+                                      (or (:y opener-pos) 0))]
+         (swap! state assoc-in [:shown file]
+                {:x x :y y
+                 :opened-by opener-file
+                 :direction direction
+                 :root?     (nil? opener-file)}))))))
+
+(defn- card-depth
+  "Length of the opened-by chain from `file` back to a root. Used by
+   reflow! to process lanes outermost-first so a parent's position is
+   already up-to-date by the time we restack its children."
+  [shown file]
+  (loop [f file, d 0]
+    (if-let [opener (:opened-by (get shown f))]
+      (recur opener (inc d))
+      d)))
+
+(defn reflow!
+  "Re-stack every (opener, direction) lane in current top-down order. A
+   card that grew taller (because the user expanded a row in it) pushes
+   its lane-siblings down so they don't overlap. Root cards stay put.
+
+   We sort lanes by opener depth so each lane sees its opener's already-
+   reflowed position, not the stale one. Within a lane, cards keep their
+   current y order (stable sort) — honors any manual drag."
+  []
+  (let [s @state
+        shown (:shown s)
+        non-root (filter (fn [[_ pos]] (some? (:opened-by pos))) shown)
+        lanes    (group-by (fn [[_ pos]] [(:opened-by pos) (:direction pos)])
+                           non-root)
+        ordered-lanes (sort-by (fn [[opener _]] (card-depth shown opener))
+                               (keys lanes))
+        roots (into {} (filter (fn [[_ pos]] (nil? (:opened-by pos))) shown))]
+    (loop [ks      ordered-lanes
+           result  roots]
+      (if (empty? ks)
+        (swap! state assoc :shown result)
+        (let [[opener-file direction] (first ks)
+              cards      (get lanes [opener-file direction])
+              opener-pos (get result opener-file)
+              opener-w   (or (get-in s [:width-by-file opener-file]) 0)
+              ordered    (sort-by (fn [[_ pos]] (:y pos)) cards)
+              fallback-y (or (:y opener-pos) 0)
+              [placed _]
+              (reduce
+               (fn [[acc y] [f pos]]
+                 (let [w   (or (get-in s [:width-by-file f]) 320)
+                       h   (card-height-est f)
+                       new-x (if (= direction :left)
+                               (- (:x opener-pos) CARD-COL-GAP w)
+                               (+ (:x opener-pos) opener-w CARD-COL-GAP))]
+                   [(assoc acc f (assoc pos :x new-x :y y))
+                    (+ y h CARD-STACK-GAP)]))
+               [{} fallback-y]
+               ordered)]
+          (recur (rest ks) (merge result placed)))))))
 
 (defn- bring-in-around!
   "Add the focused node's file (if new) and every callee/caller file of
-   the focused node (if new). Existing cards keep their position — the
-   user's mental map of where things live is preserved across navigation."
+   the focused node (if new). Callees land in a column to the right
+   (downstream), callers to the left (upstream). Existing cards keep their
+   position — the user's mental map of where things live is preserved."
   [focused-id prev-focused-id]
   (let [s @state
         {:keys [by-id]} s
         focused-file (some-> (get by-id focused-id) :file)
         prev-file    (some-> (get by-id prev-focused-id) :file)
-        opener       (when (and prev-file (not= prev-file focused-file))
-                       prev-file)]
-    (add-card! focused-file opener)
-    (doseq [f (concat (neighbor-files focused-id :out)
-                      (neighbor-files focused-id :in))]
-      (add-card! f focused-file))))
+        ;; If focused's file is new, treat it as opened by where we just
+        ;; came from. Direction follows the edge: if focused is a callee
+        ;; of something in prev-file → focused goes right; if it calls
+        ;; into prev-file → focused goes left. Default right.
+        direction-from-prev
+        (cond
+          (nil? prev-focused-id) :right
+          (some #(and (= (:from %) prev-focused-id)
+                      (= (:to %) focused-id))
+                (get-in s [:graph :edges])) :right
+          (some #(and (= (:to %) prev-focused-id)
+                      (= (:from %) focused-id))
+                (get-in s [:graph :edges])) :left
+          :else :right)
+        opener (when (and prev-file (not= prev-file focused-file))
+                 prev-file)]
+    (add-card! focused-file opener direction-from-prev)
+    (doseq [f (neighbor-files focused-id :out)]
+      (add-card! f focused-file :right))
+    (doseq [f (neighbor-files focused-id :in)]
+      (add-card! f focused-file :left))))
 
 (declare animate-to-fit!)
 
@@ -330,6 +412,7 @@
                :trail   (vec (filter #(let [f (some-> (get by-id %) :file)]
                                         (not (contains? doomed f)))
                                      (:trail s))))
+        (reflow!)
         (animate-to-fit!)))))
 
 ;; --- Camera tween ---------------------------------------------------------
@@ -405,6 +488,7 @@
       (swap! state update :expanded
              (fn [e] (into (or e #{}) (ancestor-chain by-id node-id))))
       (bring-in-around! node-id prev-focused-id)
+      (reflow!)
       (animate-to-fit!))))
 
 (defn focus!
@@ -423,7 +507,9 @@
       (nil? node-id) nil
 
       (= node-id focused)
-      (toggle-expanded! node-id)
+      (do (toggle-expanded! node-id)
+          (reflow!)
+          (animate-to-fit!))
 
       (some #(= % node-id) trail)
       (let [i (first (keep-indexed (fn [i id] (when (= id node-id) i)) trail))]
