@@ -67,18 +67,33 @@ async function analyze(filePath) {
     },
     VariableDeclarator(p) {
       const init = p.node.init;
-      if (!init) return;
-      if (
-        (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression') &&
-        p.node.id.type === 'Identifier'
-      ) {
+      if (!init || p.node.id.type !== 'Identifier') return;
+      if (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression') {
         addNode(p.node.id.name, 'function', init, p);
+      } else if (!p.getFunctionParent()) {
+        // Top-level const/let/var only — locals inside function bodies
+        // aren't structural enough to deserve their own row.
+        const decl = p.parentPath.node;
+        addNode(p.node.id.name, decl.kind || 'const', decl, p);
       }
+    },
+    ClassDeclaration(p) {
+      if (p.node.id) addNode(p.node.id.name, 'class', p.node, p);
     },
     ClassMethod(p) {
       if (p.node.key.type === 'Identifier') {
         addNode(p.node.key.name, 'method', p.node, p);
       }
+    },
+    ImportDeclaration(p) {
+      // One node per import statement. Name is the first local binding
+      // (with "…" if there are more); source is the whole statement.
+      const specs = p.node.specifiers || [];
+      if (specs.length === 0) return;
+      const first = specs[0].local && specs[0].local.name;
+      if (!first) return;
+      const name = specs.length > 1 ? `${first}, …` : first;
+      addNode(name, 'import', p.node, p);
     },
   });
 

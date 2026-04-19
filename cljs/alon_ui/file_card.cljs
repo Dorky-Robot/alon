@@ -5,9 +5,12 @@
 
 (def CARD-WIDTH       320)   ; fallback when state has no width for a file
 (def ROW-H            34)
+(def CONTAINER-PAD    10)    ; matches CSS .body.container padding
+(def CONTAINER-GAP     8)    ; matches CSS .body.container gap
 
 (defn width-for [file]
   (or (get-in @state/state [:width-by-file file]) CARD-WIDTH))
+
 (def LINE-H           16)
 (def SOURCE-PAD-TOP   6)
 (def SOURCE-PAD-BOT   12)
@@ -27,77 +30,51 @@
     (+ SOURCE-PAD-TOP (* (line-count s) LINE-H) SOURCE-PAD-BOT)
     0))
 
-(defn- meaningful-text?
-  "A source segment is worth rendering only if it contains at least one
-   non-whitespace character. Pure blank-line glue between nested function
-   defs would otherwise show up as tall dark bands between the inset rows."
-  [s]
-  (boolean (re-find #"\S" s)))
-
-(defn splice-source
-  "Walk the parent node's source and emit a vector of segments:
-     [:text \"...\"]   raw source slice (only if it has real content)
-     [:child child-id] hole where a captured nested function lives
-   Children are addressed by absolute file offsets (:start), so we subtract
-   the parent's :start to map into its own source string."
-  [parent children-of by-id]
-  (let [pstart (:start parent)
-        psrc   (:source parent)
-        kids   (->> (get children-of (:id parent) [])
-                    (keep by-id)
-                    (sort-by :start))]
-    (loop [cur 0, ks kids, acc []]
-      (if-let [k (first ks)]
-        (let [rs (- (:start k) pstart)
-              re (- (:end k)   pstart)
-              before (subs psrc (max cur 0) (max rs cur))
-              acc'   (cond-> acc (meaningful-text? before) (conj [:text before]))]
-          (recur re (rest ks) (conj acc' [:child (:id k)])))
-        (let [tail (subs psrc cur)]
-          (cond-> acc (meaningful-text? tail) (conj [:text tail])))))))
+(defn- ordered-children
+  "Direct children of `parent-id`, in declaration order."
+  [parent-id]
+  (let [{:keys [children-of by-id]} @state/state]
+    (->> (get children-of parent-id [])
+         (keep by-id)
+         (sort-by :start))))
 
 (defn row-height
-  "Total pixel height of a row given current expanded state. Recursive
-   through nested children."
+  "Total pixel height of a row given current expanded state.
+
+   When expanded, a node with captured children becomes a container —
+   its body holds child rows in a vertical stack. Otherwise an expanded
+   leaf shows its source. Collapsed rows are just the row-head."
   [node]
-  (let [{:keys [children-of by-id expanded]} @state/state
-        open? (contains? expanded (:id node))]
+  (let [{:keys [expanded]} @state/state
+        open? (contains? expanded (:id node))
+        kids  (when open? (ordered-children (:id node)))]
     (+ ROW-H
-       (if (and open? (:source node))
-         (reduce
-          (fn [acc seg]
-            (case (first seg)
-              :text  (+ acc (source-height (second seg)))
-              :child (+ acc (row-height (get by-id (second seg))))))
-          0
-          (splice-source node children-of by-id))
-         0))))
+       (cond
+         (not open?)    0
+         (seq kids)     (+ CONTAINER-PAD
+                           (reduce + (map row-height kids))
+                           (* CONTAINER-GAP (max 0 (dec (count kids))))
+                           CONTAINER-PAD)
+         (:source node) (source-height (:source node))
+         :else          0))))
 
 (defn row-top-y
   "Y offset of the row-head top for `node-id` within its file-card.
    Walks the ancestor chain so nested rows know where they live."
   [node-id]
-  (let [{:keys [by-id by-file children-of expanded]} @state/state
+  (let [{:keys [by-id by-file]} @state/state
         node (get by-id node-id)]
     (when node
       (if-let [pid (:parentId node)]
-        (let [parent  (get by-id pid)
-              ;; parent header + segments above this child
-              segs    (splice-source parent children-of by-id)
-              before  (reduce
-                       (fn [acc seg]
-                         (let [[kind v] seg]
-                           (cond
-                             (and (= kind :child) (= v node-id))
-                             (reduced acc)
-                             (= kind :text)
-                             (+ acc (source-height v))
-                             :else
-                             (+ acc (row-height (get by-id v))))))
-                       0
-                       segs)]
-          (+ (row-top-y pid) ROW-H before))
-        ;; top-level: walk siblings in the file in declaration order
+        (let [siblings (ordered-children pid)
+              before   (loop [ss siblings, y 0]
+                         (if-let [s (first ss)]
+                           (if (= (:id s) node-id)
+                             y
+                             (recur (rest ss)
+                                    (+ y (row-height s) CONTAINER-GAP)))
+                           y))]
+          (+ (row-top-y pid) ROW-H CONTAINER-PAD before))
         (let [siblings (get by-file (:file node))]
           (loop [ss siblings, y 0]
             (if-let [s (first ss)]
@@ -109,42 +86,20 @@
 (defn row-y-center [node-id]
   (+ (row-top-y node-id) (/ ROW-H 2)))
 
-(defn source-line-y
-  "Y offset, within a source string `src`, of the vertical center of the
-   line that contains character `offset`."
-  [src offset]
-  (let [before (subs src 0 (min offset (count src)))
-        nls    (count (filter #(= % \newline) before))]
-    (+ SOURCE-PAD-TOP (* nls LINE-H) (/ LINE-H 2))))
+(defn row-depth
+  "How many captured-fn ancestors `node-id` has. Top-level = 0."
+  [node-id]
+  (loop [id node-id, d 0]
+    (if-let [pid (:parentId (get-in @state/state [:by-id id]))]
+      (recur pid (inc d))
+      d)))
 
-(defn call-site-y
-  "Absolute y of a call-site at `offset` within node-id's source, accounting
-   for nested children that may live above the offset and consume more space
-   than the raw text they replace."
-  [node-id offset]
-  (let [{:keys [by-id children-of expanded]} @state/state
-        node (get by-id node-id)
-        segs (splice-source node children-of by-id)
-        pstart (:start node)]
-    (loop [ss segs, y 0, cursor 0]
-      (if-let [seg (first ss)]
-        (let [[kind v] seg]
-          (case kind
-            :text
-            (let [seg-len (count v)
-                  end     (+ cursor seg-len)]
-              (if (and (>= offset cursor) (< offset end))
-                (+ y (source-line-y v (- offset cursor)))
-                (recur (rest ss) (+ y (source-height v)) end)))
-            :child
-            (let [child  (get by-id v)
-                  c-rel-start (- (:start child) pstart)
-                  c-rel-end   (- (:end child)   pstart)]
-              (if (and (>= offset c-rel-start) (< offset c-rel-end))
-                ;; offset falls inside the child block — punt to row center
-                (+ y (/ (row-height child) 2))
-                (recur (rest ss) (+ y (row-height child)) c-rel-end)))))
-        y))))
+(defn row-x-inset
+  "Horizontal padding (each side) consumed by container ancestors before a
+   nested row's edge. Lets edges anchor at the nested card's own border
+   instead of swooping out to the outer file-card edge."
+  [node-id]
+  (* CONTAINER-PAD (row-depth node-id)))
 
 (defn- short-path [file]
   (let [parts (str/split file #"/")
@@ -155,28 +110,34 @@
 
 (defn row
   "Recursive renderer. `start-drag` is closed over by the file-card so all
-   nested rows share its drag state and lifecycle."
+   nested rows share its drag state and lifecycle. Expanded nodes with
+   captured children render in container mode (children as nested rows);
+   leaves render their source."
   [start-drag node]
-  (let [{:keys [children-of by-id expanded]} @state/state
+  (let [{:keys [expanded]} @state/state
         {:keys [id name type source]} node
-        open?    (contains? expanded id)
-        segments (when (and open? source)
-                   (splice-source node children-of by-id))]
-    [:div.row {:class (when open? "expanded")}
+        open?     (contains? expanded id)
+        kids      (when open? (ordered-children id))
+        has-kids? (seq kids)]
+    [:div.row {:class (cond-> []
+                        open?     (conj "expanded")
+                        has-kids? (conj "container"))}
      [:div.row-head
       {:on-mouse-down (fn [e] (start-drag id e))}
       [:span.kind type]
       [:span.name name]]
      (when open?
-       (into [:div.body
-              {:on-mouse-down (fn [e] (.stopPropagation e))}]
-             (map-indexed
-              (fn [i seg]
-                (let [[kind v] seg]
-                  (case kind
-                    :text  ^{:key i} [:pre.source v]
-                    :child ^{:key i} [row start-drag (get by-id v)])))
-              segments)))]))
+       (cond
+         has-kids?
+         (into [:div.body.container
+                {:on-mouse-down (fn [e] (.stopPropagation e))}]
+               (for [k kids]
+                 ^{:key (:id k)} [row start-drag k]))
+
+         source
+         [:div.body
+          {:on-mouse-down (fn [e] (.stopPropagation e))}
+          [:pre.source source]]))]))
 
 (defn file-card [file]
   (let [drag-state (r/atom nil)

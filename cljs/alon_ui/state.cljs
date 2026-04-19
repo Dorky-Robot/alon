@@ -15,6 +15,7 @@
 
 (def ^:private CHAR-W      6.6)   ; approx px per char at 11px ui-monospace
 (def ^:private SOURCE-PAD  28)    ; left + right padding on .source
+(def ^:private CONTAINER-PAD 10)  ; mirror file-card's CONTAINER-PAD
 (def ^:private MIN-WIDTH   280)
 (def ^:private MAX-WIDTH   1100)  ; sanity cap; very long lines still scroll
 
@@ -23,10 +24,24 @@
     (transduce (map count) max 0 (str/split s #"\n"))
     0))
 
-(defn- file-width [nodes]
-  (let [longest (->> nodes (map :source) (map max-line-len) (reduce max 0))]
-    (-> (* longest CHAR-W)
-        (+ SOURCE-PAD)
+(defn- node-depth [node by-id]
+  (loop [n node, d 0]
+    (if-let [pid (:parentId n)]
+      (recur (get by-id pid) (inc d))
+      d)))
+
+(defn- file-width
+  "Width that fits each leaf-source line at its rendered depth — every
+   container ancestor consumes 2×CONTAINER-PAD of horizontal room."
+  [nodes by-id]
+  (let [needs (for [n nodes
+                    :when (string? (:source n))
+                    :let [longest (max-line-len (:source n))
+                          d       (node-depth n by-id)]]
+                (+ (* longest CHAR-W)
+                   SOURCE-PAD
+                   (* 2 d CONTAINER-PAD)))]
+    (-> (reduce max 0 needs)
         (Math/ceil)
         (max MIN-WIDTH)
         (min MAX-WIDTH)
@@ -67,13 +82,47 @@
       (doseq [n (:nodes graph)] (visit (:id n))))
     @order))
 
+(defn- barycenter-order
+  "Reorder ids in `seed` so within-scope edges have minimal vertical
+   tangle. Each iteration assigns every node a barycenter — the mean
+   index of its in-scope neighbors — and re-sorts. External edges
+   (touching a node not in this scope) are ignored: those endpoints
+   are out of our control here.
+
+   Ties break by current index, which keeps the sort stable and
+   prevents the iteration from oscillating between equivalent layouts."
+  [seed edges]
+  (let [in-scope (set seed)
+        adj (reduce (fn [m {:keys [from to]}]
+                      (if (and (in-scope from) (in-scope to) (not= from to))
+                        (-> m
+                            (update from (fnil conj #{}) to)
+                            (update to   (fnil conj #{}) from))
+                        m))
+                    {} edges)]
+    (loop [order (vec seed), iter 0]
+      (if (>= iter 10)
+        order
+        (let [pos        (into {} (map-indexed (fn [i id] [id i])) order)
+              barycenter (fn [id]
+                           (let [neigh (get adj id)]
+                             (if (seq neigh)
+                               (/ (reduce + (map pos neigh)) (count neigh))
+                               (get pos id))))
+              next-order (vec (sort-by (juxt barycenter pos) order))]
+          (if (= next-order order)
+            order
+            (recur next-order (inc iter))))))))
+
 (defn init-graph! [graph]
   (let [nodes    (:nodes graph)
         by-id    (into {} (map (juxt :id identity)) nodes)
         trace    (compute-trace-order graph)
+        edges    (:edges graph)
         ;; Group children under their parentId, sorted by :start so they
         ;; appear in source order. Top-level nodes (parentId nil) are kept
-        ;; separately and ordered by trace.
+        ;; separately and ordered by trace, then polished by barycenter to
+        ;; minimize edge tangle.
         children-of (->> nodes
                          (filter :parentId)
                          (group-by :parentId)
@@ -85,13 +134,16 @@
                          (group-by :file)
                          (into {}
                                (map (fn [[f ns]]
-                                      [f (vec (sort-by #(get trace (:id %) 1e9) ns))]))))
+                                      (let [trace-ordered (sort-by #(get trace (:id %) 1e9) ns)
+                                            by-id-local   (into {} (map (juxt :id identity)) trace-ordered)
+                                            optimized     (barycenter-order (mapv :id trace-ordered) edges)]
+                                        [f (mapv by-id-local optimized)])))))
         ;; Width considers ALL nodes in the file (including nested), so the
         ;; card stays the same width whether children are expanded or not.
         width-by-file (->> nodes
                            (group-by :file)
                            (into {}
-                                 (map (fn [[f ns]] [f (file-width ns)]))))
+                                 (map (fn [[f ns]] [f (file-width ns by-id)]))))
         edges-by-from (reduce (fn [m e] (update m (:from e) (fnil conj []) e))
                               {} (:edges graph))
         entry    (:root graph)

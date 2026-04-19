@@ -129,15 +129,26 @@
     .file-card .body > .source:first-child { padding-top: 6px; }
     .file-card .body > .source:last-child  { padding-bottom: 12px; }
 
-    /* Nested rows live inside .body. Keep their vertical geometry identical
-       to top-level rows so the analytical row-height math stays correct.
-       A subtle left border + lighter background gives the nesting cue. */
-    .file-card .body .row {
-      background: #ededf0;
-      border-left: 3px solid #5a8aff;
+    /* Container mode: when an expanded node has captured children, its
+       body becomes a vertical stack of free-standing nested cards.
+       Padding and gap match CONTAINER-PAD/CONTAINER-GAP in file_card.cljs
+       so row-height math lines up with the rendered geometry. */
+    .file-card .body.container {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
-    .file-card .body .row.expanded { background: #1c1c25; }
-    .file-card .body .row + .row { border-top: 1px solid #0c0c12; }
+    .file-card .body.container > .row {
+      background: #ededf0;
+      border: 1px solid #0c0c12;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .file-card .body.container > .row.expanded { background: #1c1c25; }
+    /* Suppress the global .row + .row top border inside containers — gap
+       between cards already separates them. */
+    .file-card .body.container > .row + .row { border-top: 1px solid #0c0c12; }
     .file-card .path {
       margin-top: 8px;
       padding-left: 4px;
