@@ -12,9 +12,13 @@
 ;;    :shown         {fn-id {:x N :y N :opened-by fn-id|nil :root? bool}}
 ;;    :expanded-nested #{nested-id ...}  ; Xcode-style disclosure: empty = all nested
 ;;                                       ; fns render as `fn(...) { … }` pills
-;;    :fit-mode      :all | :solo    ; double-tap zoom toggle; any user-initiated
-;;                                    ; camera change resets this to :all
-;;    :focused       fn-id
+;;    :fit-mode      :all | :solo    ; persistent camera mode. :all → any layout
+;;                                    ; change fits the whole graph; :solo → any
+;;                                    ; layout change (or new focus) fits :focused.
+;;                                    ; Double-tap on a card toggles between the two.
+;;                                    ; Manual pan/zoom is a one-off override that
+;;                                    ; does NOT change mode.
+;;    :focused       fn-id           ; in :solo mode this is also the fit target
 ;;    :trail         [fn-id ...]
 ;;    :pan-x N :pan-y N :zoom N}
 ;;
@@ -109,14 +113,14 @@
 (defn card-height-est [fn-id]
   (or (get-in @state [:height-by-id fn-id]) CARD-FALLBACK-H))
 
-(declare reflow! animate-to-fit!)
+(declare reflow! animate-to-fit! refit!)
 
 (defn set-measured-height! [fn-id h]
   (let [cur (get-in @state [:height-by-id fn-id])]
     (when (and h (or (nil? cur) (not= (int cur) (int h))))
       (swap! state assoc-in [:height-by-id fn-id] h)
       (reflow!)
-      (animate-to-fit!))))
+      (refit!))))
 
 (defn- next-y-below-siblings
   "Lowest free y in the lane spawned by `opener-id`. New children of the
@@ -215,7 +219,6 @@
                   (max 0.2))
            tx (- (* (:cx bb) tz))
            ty (- (* (:cy bb) tz))]
-       (swap! state assoc :fit-mode :all)
        (animate-to! tx ty tz duration-ms)))))
 
 (defn- bbox-of-node [fn-id]
@@ -227,41 +230,112 @@
       {:cx (+ (:x pos) (/ w 2))
        :cy (+ (:y pos) (/ h 2))
        :w  w
-       :h  h})))
+       :h  h
+       :top (:y pos)
+       :bot (+ (:y pos) h)})))
+
+(defn- viewport-center-world-y []
+  (let [{:keys [pan-y zoom]} @state]
+    (if (and zoom (not (zero? zoom)))
+      (/ (- pan-y) zoom)
+      0)))
+
+(defn client-y->world-y
+  "Convert a DOM clientY into the world-Y coordinate it maps to under the
+   current pan/zoom. See canvas.cljs for the transform: .canvas is pinned
+   at left/top 50% with origin 0,0, so screen_y = vh/2 + pan_y + world_y*zoom."
+  [client-y]
+  (let [{:keys [pan-y zoom]} @state
+        vh (.-innerHeight js/window)]
+    (if (and zoom (not (zero? zoom)))
+      (/ (- client-y (/ vh 2) pan-y) zoom)
+      0)))
 
 (defn animate-to-node!
-  "Pan/zoom so `fn-id`'s card fills the viewport with padding. Unlike
-   animate-to-fit!, this does NOT touch :fit-mode — the caller owns that
-   so double-tap can enter :solo without it getting stomped."
-  ([fn-id] (animate-to-node! fn-id 380))
-  ([fn-id duration-ms]
+  "Solo-mode fit. Fits the node on WIDTH (capped at 1.0 so text stays
+   naturally readable — long function bodies used to zoom out so far
+   they were unreadable). If the node's scaled height still exceeds
+   the viewport, vertically anchor on `anchor-y` (a world-Y, typically
+   the user's click point) clamped to the node's own top/bottom so we
+   never show whitespace around the card. Short nodes just center."
+  ([fn-id] (animate-to-node! fn-id 380 nil))
+  ([fn-id duration-ms] (animate-to-node! fn-id duration-ms nil))
+  ([fn-id duration-ms anchor-y]
    (when-let [bb (bbox-of-node fn-id)]
-     (let [vw  (.-innerWidth js/window)
-           vh  (.-innerHeight js/window)
-           pad 80
-           tz  (-> (min (/ (- vw (* 2 pad)) (max 1 (:w bb)))
-                        (/ (- vh (* 2 pad)) (max 1 (:h bb)))
-                        1.5)
-                   (max 0.2))
-           tx  (- (* (:cx bb) tz))
-           ty  (- (* (:cy bb) tz))]
+     (let [vw       (.-innerWidth js/window)
+           vh       (.-innerHeight js/window)
+           pad      40
+           ;; Fit on width so card fills most of the viewport. Cap at 2.0
+           ;; so a narrow card doesn't blow up to wall-of-text on a wide
+           ;; display, but the text scales well past the 1.0 "natural size"
+           ;; baseline — source font is small for compactness, not display.
+           tz       (-> (/ (- vw (* 2 pad)) (max 1 (:w bb)))
+                        (min 2.0)
+                        (max 0.2))
+           scaled-h (* (:h bb) tz)
+           ;; World-y half-viewport at target zoom.
+           half-vh  (/ vh (* 2 tz))
+           center-y (if (<= scaled-h vh)
+                      (:cy bb)
+                      (let [raw (or anchor-y (+ (:top bb) half-vh))]
+                        (-> raw
+                            (max (+ (:top bb) half-vh))
+                            (min (- (:bot bb) half-vh)))))
+           tx       (- (* (:cx bb) tz))
+           ty       (- (* center-y tz))]
        (animate-to! tx ty tz duration-ms)))))
+
+(defn refit!
+  "Re-run the camera fit according to the current :fit-mode. Call this
+   after any state change that affects what should be framed — layout
+   (reflow, resize), the shown set (spawn/dismiss), or :focused in
+   solo mode. Pan/zoom mutations are manual overrides and deliberately
+   do NOT call refit! — the next real layout change will reassert the
+   mode's invariant.
+
+   `anchor-y` (optional world-Y) biases the solo-mode vertical framing on
+   tall nodes. If omitted, we reuse the current viewport-center world-Y
+   so passive refits (height measurements, collapse/expand) keep the
+   user near where they were looking instead of snapping to the top.
+
+   :all  → fit everything
+   :solo → fit :focused if it's on the canvas; fall through to :all
+           (so dismissing the solo target to nothing doesn't leave
+            the camera stranded)"
+  ([] (refit! nil))
+  ([anchor-y]
+   (let [s @state]
+     (case (:fit-mode s)
+       :solo (let [f (:focused s)
+                   a (or anchor-y (viewport-center-world-y))]
+               (if (and f (contains? (:shown s) f))
+                 (animate-to-node! f 380 a)
+                 (animate-to-fit!)))
+       :all  (animate-to-fit!)
+       nil))))
 
 ;; --- Navigation -----------------------------------------------------------
 
 (defn focus!
   "Mark `fn-id` as the current you-are-here. Trail pushes the previously
-   focused box; clicking a node already in the trail jumps back and truncates."
-  [fn-id]
-  (when (and fn-id (contains? (:shown @state) fn-id))
-    (let [{:keys [focused trail]} @state
-          in-trail-idx (first (keep-indexed (fn [i id] (when (= id fn-id) i)) trail))]
-      (swap! state assoc
-             :focused fn-id
-             :trail   (cond
-                        in-trail-idx (vec (subvec trail 0 in-trail-idx))
-                        (and focused (not= focused fn-id)) (conj trail focused)
-                        :else trail)))))
+   focused box; clicking a node already in the trail jumps back and truncates.
+   In :solo mode, focusing a different node re-fits the camera onto it — that's
+   how 'single-tap in solo mode zooms to the tapped node' is implemented.
+
+   `anchor-y` (optional world-Y) biases solo-mode vertical framing on tall
+   nodes — see refit!."
+  ([fn-id] (focus! fn-id nil))
+  ([fn-id anchor-y]
+   (when (and fn-id (contains? (:shown @state) fn-id))
+     (let [{:keys [focused trail]} @state
+           in-trail-idx (first (keep-indexed (fn [i id] (when (= id fn-id) i)) trail))]
+       (swap! state assoc
+              :focused fn-id
+              :trail   (cond
+                         in-trail-idx (vec (subvec trail 0 in-trail-idx))
+                         (and focused (not= focused fn-id)) (conj trail focused)
+                         :else trail))
+       (refit! anchor-y)))))
 
 (defn spawn-call!
   "Reveal `to-id` in a new box anchored to the right of `from-id`. If the
@@ -279,7 +353,7 @@
                  {:x x :y y :opened-by from-id :root? false})))
       (focus! to-id)
       (reflow!)
-      (animate-to-fit!))))
+      (refit!))))
 
 (defn dismiss!
   "Remove `fn-id` and every box it transitively spawned. Focus jumps back
@@ -312,7 +386,7 @@
                :focused new-focused
                :trail   (vec (remove doomed trail)))
         (reflow!)
-        (animate-to-fit!)))))
+        (refit!)))))
 
 (defn move-card! [fn-id dx dy origin-x origin-y]
   (swap! state update-in [:shown fn-id]
@@ -321,7 +395,8 @@
 (defn toggle-nested!
   "Flip the Xcode-style disclosure on a nested function. Collapsed nesteds
    render as `fn(...) { … }` pills; expanded ones render their body inline
-   with their own children still starting collapsed."
+   with their own children still starting collapsed. The card's size changes,
+   so we refit according to the current :fit-mode."
   [nested-id]
   (when nested-id
     (swap! state update :expanded-nested
@@ -329,20 +404,26 @@
                      (disj s nested-id)
                      (conj (or s #{}) nested-id))))
     (reflow!)
-    (animate-to-fit!)))
+    (refit!)))
 
 (defn double-tap-node!
-  "Toggle between fit-to-single-node (:solo) and fit-to-everything (:all).
-   First double-tap zooms onto that card; second double-tap anywhere zooms
-   back out. Any other user-initiated camera move resets to :all, so the
-   next double-tap always enters solo cleanly."
-  [fn-id]
-  (when (and fn-id (contains? (:shown @state) fn-id))
-    (if (= :solo (:fit-mode @state))
-      (animate-to-fit!)
-      (do
-        (swap! state assoc :fit-mode :solo)
-        (animate-to-node! fn-id)))))
+  "Toggle between :all (fit whole graph) and :solo (fit just the focused
+   node). Entering :solo uses the tapped card as the new focused + fit
+   target. Exiting to :all frames the whole graph. The mode persists —
+   subsequent layout changes, toggle-nested, and even single-tap on a
+   different card re-fit according to the active mode.
+
+   `anchor-y` (optional world-Y) biases solo-mode vertical framing on tall
+   nodes — see refit!."
+  ([fn-id] (double-tap-node! fn-id nil))
+  ([fn-id anchor-y]
+   (when (and fn-id (contains? (:shown @state) fn-id))
+     (if (= :solo (:fit-mode @state))
+       (do (swap! state assoc :fit-mode :all)
+           (refit!))
+       (do (swap! state assoc :fit-mode :solo)
+           ;; focus! also calls refit! — which in :solo frames fn-id.
+           (focus! fn-id anchor-y))))))
 
 ;; --- Init -----------------------------------------------------------------
 
@@ -388,11 +469,11 @@
            :zoom            1)))
 
 (defn set-pan! [x y]
-  (swap! state assoc :pan-x x :pan-y y :fit-mode :all))
+  (swap! state assoc :pan-x x :pan-y y))
 
 (defn set-zoom! [z px py]
   (let [{:keys [pan-x pan-y zoom]} @state
         ratio  (/ z zoom)
         new-px (+ (* px (- 1 ratio)) (* ratio pan-x))
         new-py (+ (* py (- 1 ratio)) (* ratio pan-y))]
-    (swap! state assoc :zoom z :pan-x new-px :pan-y new-py :fit-mode :all)))
+    (swap! state assoc :zoom z :pan-x new-px :pan-y new-py)))

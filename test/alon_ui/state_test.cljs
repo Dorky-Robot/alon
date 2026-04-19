@@ -121,25 +121,33 @@
   (is (not (contains? (:expanded-nested @state/state) "a/nested"))
       "second toggle collapses it back"))
 
-;; ---- double-tap zoom toggle ---------------------------------------------
+;; ---- camera modes -------------------------------------------------------
+;;
+;; :fit-mode is persistent. :all frames the whole graph on every layout
+;; change; :solo frames the currently focused node. Double-tap toggles
+;; between them. Manual pan/zoom is a momentary override and does not
+;; change the mode — the next real layout change reasserts it.
 
 (deftest init-graph-starts-in-fit-all-mode
   (install-graph! sample-graph)
   (is (= :all (:fit-mode @state/state))
       "a freshly loaded graph begins in fit-all camera mode"))
 
-(deftest double-tap-from-all-enters-solo
+(deftest double-tap-from-all-enters-solo-and-focuses-the-tapped-node
   (install-graph! sample-graph)
+  (state/spawn-call! "a/outer" "a/helper")
+  ;; focused is helper; double-tap outer should re-focus + enter :solo.
   (state/double-tap-node! "a/outer")
-  (is (= :solo (:fit-mode @state/state))
-      "first double-tap from :all mode enters :solo so the next one exits"))
+  (is (= :solo    (:fit-mode @state/state)))
+  (is (= "a/outer" (:focused  @state/state))
+      "entering :solo on a card makes it the focused / fit target"))
 
 (deftest double-tap-from-solo-exits-to-all
   (install-graph! sample-graph)
   (swap! state/state assoc :fit-mode :solo)
   (state/double-tap-node! "a/outer")
   (is (= :all (:fit-mode @state/state))
-      "second double-tap reverts :solo → :all by routing through animate-to-fit!"))
+      "second double-tap exits :solo → :all"))
 
 (deftest double-tap-ignores-unshown-nodes
   (install-graph! sample-graph)
@@ -147,16 +155,41 @@
   (is (= :all (:fit-mode @state/state))
       "double-tapping a fn-id that isn't on the canvas is a no-op"))
 
-(deftest pan-resets-fit-mode
+(deftest pan-does-not-change-fit-mode
   (install-graph! sample-graph)
   (swap! state/state assoc :fit-mode :solo)
   (state/set-pan! 42 42)
-  (is (= :all (:fit-mode @state/state))
-      "any user-initiated pan should exit :solo so the next double-tap re-enters it"))
+  (is (= :solo (:fit-mode @state/state))
+      "manual pan is a momentary override; :fit-mode persists until double-tap"))
 
-(deftest zoom-resets-fit-mode
+(deftest zoom-does-not-change-fit-mode
   (install-graph! sample-graph)
   (swap! state/state assoc :fit-mode :solo)
   (state/set-zoom! 1.2 0 0)
-  (is (= :all (:fit-mode @state/state))
-      "any user-initiated zoom should also exit :solo"))
+  (is (= :solo (:fit-mode @state/state))
+      "manual zoom is a momentary override; :fit-mode persists until double-tap"))
+
+(deftest toggle-nested-preserves-fit-mode
+  (install-graph! sample-graph)
+  (swap! state/state assoc :fit-mode :solo)
+  (state/toggle-nested! "a/nested")
+  (is (= :solo (:fit-mode @state/state))
+      "expanding a nested while solo keeps you solo so you can keep inspecting the card"))
+
+(deftest spawn-call-in-solo-preserves-mode-and-follows-focus
+  (install-graph! sample-graph)
+  (swap! state/state assoc :fit-mode :solo)
+  (state/spawn-call! "a/outer" "a/helper")
+  (is (= :solo     (:fit-mode @state/state)))
+  (is (= "a/helper" (:focused @state/state))
+      "spawn-call focuses the callee; in :solo mode the fit target = :focused → helper"))
+
+(deftest single-tap-on-new-card-in-solo-retargets-fit
+  (install-graph! sample-graph)
+  (state/spawn-call! "a/outer" "a/helper")  ; focused=helper
+  (swap! state/state assoc :fit-mode :solo)
+  (state/focus! "a/outer")
+  (is (= "a/outer" (:focused @state/state))
+      "tapping another card in :solo shifts focus (and thereby the camera target)")
+  (is (= :solo (:fit-mode @state/state))
+      "the mode itself does not change — only the fit target"))

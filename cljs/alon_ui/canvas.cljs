@@ -19,18 +19,22 @@
                                       (- (.-clientY e) (:y p)))))
         on-up     (fn [_] (reset! pan-state nil))
         on-wheel  (fn [e]
-                    ;; Trackpad pinch surfaces as wheel + ctrlKey. Let plain
-                    ;; wheel fall through so scrollable children (e.g. expanded
-                    ;; source) can scroll normally.
-                    (when (.-ctrlKey e)
-                      (.preventDefault e)
+                    (.preventDefault e)
+                    (if (.-ctrlKey e)
+                      ;; Trackpad pinch surfaces as wheel + ctrlKey → zoom.
                       (let [factor   (if (pos? (.-deltaY e)) 0.9 1.1)
                             zoom     (:zoom @state/state)
                             new-zoom (max 0.2 (min 3 (* zoom factor)))
                             rect     (.. e -currentTarget getBoundingClientRect)
                             px       (- (.-clientX e) (.-left rect) (/ (.-width rect) 2))
                             py       (- (.-clientY e) (.-top rect)  (/ (.-height rect) 2))]
-                        (state/set-zoom! new-zoom px py))))]
+                        (state/set-zoom! new-zoom px py))
+                      ;; Plain wheel (mouse scroll or two-finger drag) pans
+                      ;; the canvas. Cards don't have internal scroll, so
+                      ;; wheel-over-a-card falls up to us and pans the stage.
+                      (let [{:keys [pan-x pan-y]} @state/state]
+                        (state/set-pan! (- pan-x (.-deltaX e))
+                                        (- pan-y (.-deltaY e))))))]
     (r/create-class
      {:component-did-mount
       (fn [_]

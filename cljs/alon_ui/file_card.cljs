@@ -325,9 +325,18 @@
                      dragging?    (conj "dragging"))
             :ref   (fn [el] (reset! el-ref el))
             :style {:left (:x pos) :top (:y pos) :width (width-for fn-id)}
+            ;; Click anywhere in the card (body whitespace, source non-text)
+            ;; focuses it. Interactive children (call-link, pill, expander,
+            ;; dismiss) stopPropagation on click, so they keep their own
+            ;; semantics. row-head/path also route through focus! via the
+            ;; drag-end handler on drag-with-no-move, which is idempotent.
+            :on-click (fn [e]
+                        (.stopPropagation e)
+                        (state/focus! fn-id (state/client-y->world-y (.-clientY e))))
             :on-double-click (fn [e]
                                (.stopPropagation e)
-                               (state/double-tap-node! fn-id))}
+                               (state/double-tap-node!
+                                fn-id (state/client-y->world-y (.-clientY e))))}
            [:div.card
             [:div.row
              [:div.row-head
