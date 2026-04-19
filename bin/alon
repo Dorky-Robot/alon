@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# alon — explore the flow and architecture of a codebase.
+#
+# Usage: alon <entry-file> [--port N]
+#
+# Backend is babashka (Clojure, no JVM). Frontend is scittle + reagent
+# (no build, no JVM). Analyzer shells out to a small Node script that uses
+# Babel to parse JS/TS. Runs cleanly inside a kubo container.
+
+set -e
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$DIR"
+
+if ! command -v bb >/dev/null 2>&1; then
+  echo "alon: babashka (bb) not found." >&2
+  echo "alon: run bin/setup once to install it." >&2
+  exit 127
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "alon: node not found (analyzer needs it)." >&2
+  exit 127
+fi
+
+if [ ! -d node_modules ]; then
+  echo "alon: installing analyzer deps (one-time)…" >&2
+  npm install --silent
+fi
+
+exec bb start "$@"
