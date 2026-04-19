@@ -25,6 +25,23 @@
 (defn width-for [fn-id]
   (or (get-in @state/state [:width-by-id fn-id]) CARD-WIDTH))
 
+(defn- relative-to-root
+  "Strip the entry file's directory from `file` so the dismiss chip reads
+   `subdir/name.mjs:fn` rather than the absolute path. Falls back to the
+   basename if `file` doesn't sit under the entry's directory."
+  [file root]
+  (if (and (string? file) (string? root))
+    (let [slash  (str/last-index-of root "/")
+          prefix (when slash (subs root 0 (inc slash)))]
+      (cond
+        (and prefix (str/starts-with? file prefix))
+        (subs file (count prefix))
+
+        :else
+        (let [i (str/last-index-of file "/")]
+          (if i (subs file (inc i)) file))))
+    (or file "")))
+
 (defn- count-newlines [s]
   (if (string? s)
     (count (filter #(= % \newline) s))
@@ -360,4 +377,5 @@
                                  (.stopPropagation e)
                                  (state/dismiss! fn-id))}
                "×"]
-              (:name node)])]))})))
+              (str (relative-to-root (:file node) (get-in s [:graph :root]))
+                   ":" (:name node))])]))})))
