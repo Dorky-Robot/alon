@@ -41,12 +41,19 @@ test('parseFile captures top-level const without signature', async () => {
   assert.equal(greeting.signature, null);
 });
 
-test('parseFile captures arrow const as function with signature', async () => {
+test('parseFile does NOT capture expression-bodied arrow const (one-liner stays inline)', async () => {
   const rec = await parseFixture('simple.mjs');
   const arrow = rec.nodes.find(n => n.name === 'arrow');
-  assert.ok(arrow);
-  assert.equal(arrow.type, 'function');
-  assert.equal(arrow.signature, 'arrow(n)');
+  assert.equal(arrow, undefined,
+    'expression-body arrow is too small for its own card; it belongs inline in the parent source');
+});
+
+test('parseFile captures block-bodied arrow const as function with signature', async () => {
+  const rec = await parseFixture('simple.mjs');
+  const blockArrow = rec.nodes.find(n => n.name === 'blockArrow');
+  assert.ok(blockArrow, 'block-body arrow deserves its own card');
+  assert.equal(blockArrow.type, 'function');
+  assert.equal(blockArrow.signature, 'blockArrow(n)');
 });
 
 test('parseFile emits an import row but does not put it in `declared`', async () => {
@@ -107,10 +114,55 @@ test('parseFile captures object-literal methods as nested functions of the enclo
   assert.equal(ident.parentId, host.id);
 
   const arrow = rec.nodes.find(n => n.name === 'shorthandArrow');
-  assert.ok(arrow, 'function-valued ObjectProperty captured');
-  assert.equal(arrow.type, 'function');
-  assert.equal(arrow.parentId, host.id);
-  assert.equal(arrow.signature, 'shorthandArrow(p)');
+  assert.equal(arrow, undefined,
+    'expression-body arrow stays inline, even as an ObjectProperty value');
+});
+
+test('ObjectMethod nodes do NOT shadow imported names in the call-resolver', async () => {
+  // An object method named `parse` must not steal edges that should cross
+  // the import boundary to a real `parse` function in another file.
+  const { writeFileSync, mkdtempSync } = await import('node:fs');
+  const os = await import('node:os');
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'alon-shadow-'));
+  const entryPath = path.join(tmp, 'entry.mjs');
+  const utilPath  = path.join(tmp, 'util.mjs');
+  writeFileSync(utilPath, 'export function parse(x) { return x; }\n');
+  writeFileSync(entryPath,
+    "import { parse } from './util.mjs';\n" +
+    "function useIt() {\n" +
+    "  const cfg = { parse(x) { return x; } };\n" +
+    "  return parse('hi');\n" +
+    "}\n");
+  const entry = parseFile(entryPath, await readFile(entryPath, 'utf8'), tmp);
+  const util  = parseFile(utilPath,  await readFile(utilPath, 'utf8'),  tmp);
+  const all = new Map([[entry.filePath, entry], [util.filePath, util]]);
+  for (const [, b] of entry.importBindings) b.resolvedFile = util.filePath;
+
+  const edges = collectCalls(entry, all);
+  const useItId = entry.nodes.find(n => n.name === 'useIt').id;
+  const parseId = util.nodes.find(n => n.name === 'parse').id;
+  const match = edges.find(e => e.from === useItId && e.to === parseId);
+  assert.ok(match,
+    `useIt → util.parse must win over the local object-property 'parse'. edges=${JSON.stringify(edges.map(e => [e.from, e.to]))}`);
+});
+
+test('calls inside an ObjectMethod body emit a from-edge anchored at the method', async () => {
+  const { writeFileSync, mkdtempSync } = await import('node:fs');
+  const os = await import('node:os');
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'alon-objcall-'));
+  const entryPath = path.join(tmp, 'entry.mjs');
+  writeFileSync(entryPath,
+    "function sink(_x) {}\n" +
+    "function host() {\n" +
+    "  walk({ CallExpression(p) { sink(p); } });\n" +
+    "}\n" +
+    "function walk(_v) {}\n");
+  const entry = parseFile(entryPath, await readFile(entryPath, 'utf8'), tmp);
+  const edges = collectCalls(entry, new Map([[entry.filePath, entry]]));
+  const callMethodId = entry.nodes.find(n => n.name === 'CallExpression').id;
+  const sinkId       = entry.nodes.find(n => n.name === 'sink').id;
+  assert.ok(edges.find(e => e.from === callMethodId && e.to === sinkId),
+    `CallExpression(p) → sink edge missing. edges=${JSON.stringify(edges.map(e => [e.from, e.to]))}`);
 });
 
 test('call-edge offsets are relative to enclosing function', async () => {

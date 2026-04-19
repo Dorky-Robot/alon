@@ -12,3 +12,8 @@ function outer(name) {
 }
 
 const arrow = (n) => outer(n);
+
+const blockArrow = (n) => {
+  const r = outer(n);
+  return r + '!';
+};
