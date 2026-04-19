@@ -41,14 +41,24 @@ export function parseFile(filePath, code, rootDir) {
     return null;
   }
 
+  function buildSignature(astNode) {
+    // Slice each param's own source range so defaults, rest, and destructuring
+    // patterns round-trip exactly as written instead of being re-stringified.
+    if (!Array.isArray(astNode.params)) return null;
+    return astNode.params.map(pr => code.slice(pr.start, pr.end)).join(', ');
+  }
+
   function addNode(name, type, astNode, p) {
     if (declared.has(name)) return declared.get(name);
     const line = astNode.loc.start.line;
     const id = nodeId(name, line);
     const source = code.slice(astNode.start, astNode.end);
     const parentId = p ? nearestCapturedAncestor(p) : null;
+    const signature = (type === 'function' || type === 'method')
+      ? `${name}(${buildSignature(astNode) || ''})`
+      : null;
     nodes.push({
-      id, name, type, file: filePath, line, source,
+      id, name, type, file: filePath, line, source, signature,
       start: astNode.start, end: astNode.end, parentId,
     });
     declared.set(name, id);
@@ -78,6 +88,22 @@ export function parseFile(filePath, code, rootDir) {
     ClassMethod(p) {
       if (p.node.key.type === 'Identifier') {
         addNode(p.node.key.name, 'method', p.node, p);
+      }
+    },
+    ObjectMethod(p) {
+      // Methods on object literals passed as arguments — e.g. visitor tables
+      // like `traverse(ast, { CallExpression(p) {...} })` — are functionally
+      // nested functions of the enclosing scope. Capture them so the UI can
+      // render each one as its own card.
+      if (p.node.key.type === 'Identifier') {
+        addNode(p.node.key.name, 'function', p.node, p);
+      }
+    },
+    ObjectProperty(p) {
+      const val = p.node.value;
+      if (p.node.key.type !== 'Identifier' || !val) return;
+      if (val.type === 'ArrowFunctionExpression' || val.type === 'FunctionExpression') {
+        addNode(p.node.key.name, 'function', val, p);
       }
     },
     ImportDeclaration(p) {

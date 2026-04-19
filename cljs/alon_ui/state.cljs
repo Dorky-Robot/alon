@@ -496,37 +496,37 @@
       (animate-to-fit!))))
 
 (defn focus!
-  "Navigate to `node-id`.
-     - already focused: toggle its expansion (so re-clicking can collapse)
-     - in trail: jump back, truncating the trail just before it
-     - otherwise: promote, pushing old focused onto trail
+  "Navigate to `node-id`. Always updates focus + trail, then toggles
+   expansion based on what the clicked row is currently showing.
 
-   New focuses accumulate cards (Wikipedia-style) — previously visited
-   files stay until the user dismisses them. Re-click on focused just
-   toggles expansion."
+   - If the row is already expanded (whether or not it was focused),
+     a click collapses it in one step. Without this the user had to
+     click twice to close a parent container they 'passed through'
+     on the way down.
+
+   - If the row is collapsed (or hidden inside a collapsed parent),
+     the click reveals it: add self + every ancestor to :expanded,
+     and bring in caller/callee files for navigation.
+
+   Trail: clicking a node already in the trail jumps back and truncates;
+   clicking anything else pushes the previously-focused node onto trail."
   [node-id]
-  (let [{:keys [focused trail]} @state
-        prev-focused focused]
-    (cond
-      (nil? node-id) nil
-
-      (= node-id focused)
-      (do (toggle-expanded! node-id)
-          (reflow!)
-          (animate-to-fit!))
-
-      (some #(= % node-id) trail)
-      (let [i (first (keep-indexed (fn [i id] (when (= id node-id) i)) trail))]
-        (swap! state assoc
-               :focused node-id
-               :trail   (vec (subvec trail 0 i)))
+  (when node-id
+    (let [{:keys [focused trail expanded]} @state
+          prev-focused focused
+          in-trail-idx (first (keep-indexed (fn [i id] (when (= id node-id) i)) trail))
+          was-expanded? (contains? expanded node-id)]
+      (swap! state assoc
+             :focused node-id
+             :trail   (cond
+                        in-trail-idx (vec (subvec trail 0 in-trail-idx))
+                        (and focused (not= focused node-id)) (conj trail focused)
+                        :else trail))
+      (if was-expanded?
+        (swap! state update :expanded disj node-id)
         (ensure-focus-visible! node-id prev-focused))
-
-      :else
-      (do (swap! state assoc
-                 :focused node-id
-                 :trail   (if focused (conj trail focused) trail))
-          (ensure-focus-visible! node-id prev-focused)))))
+      (reflow!)
+      (animate-to-fit!))))
 
 (defn set-pan! [x y]
   (swap! state assoc :pan-x x :pan-y y))
