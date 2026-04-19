@@ -122,29 +122,15 @@
       font-size: 14px;
       color: #1a1a20;
     }
-    .file-card .row.expanded { background: #1c1c25; }
-    .file-card .row.expanded + .row { border-top-color: #0c0c12; }
-    /* Focused row: current "you are here" in the Wikipedia-style walk.
-       Trail rows: breadcrumb of previously-focused rows. Both act as
-       subtle color cues layered on top of the normal expanded treatment. */
-    .file-card .row.focused > .row-head { box-shadow: inset 3px 0 0 #ffaa55; }
-    .file-card .row.focused > .row-head .name { color: #ffaa55; }
-    .file-card .row.expanded.focused > .row-head .name { color: #ffc88a; }
-    .file-card .row.trail > .row-head { box-shadow: inset 3px 0 0 #5a8aff; }
-    .file-card .row.trail > .row-head .name { color: #8fa8ff; }
-    .file-card .row.expanded.trail > .row-head .name { color: #aabfff; }
-    /* Direct-child selectors so nested rows don't inherit the
-       dark-background color treatment of their expanded parent. */
-    .file-card .row.expanded > .row-head .kind { color: #8c8ca0; }
-    .file-card .row.expanded > .row-head .name { color: #e6e6ea; }
+    /* Focused box: current "you are here". Trail: previously-focused boxes.
+       Applied to the outer card so the cue reads at a glance even zoomed out. */
+    .file-card.focused .card { box-shadow: 0 0 0 2px #ffaa55, 0 6px 18px rgba(0, 0, 0, 0.55); }
+    .file-card.trail   .card { box-shadow: 0 0 0 2px #5a8aff, 0 6px 18px rgba(0, 0, 0, 0.55); }
 
-    .file-card .body {
-      background: #1c1c25;
-    }
     .file-card .source {
       margin: 0;
-      padding: 0 14px;
-      background: transparent;
+      padding: 6px 14px 12px 14px;
+      background: #1c1c25;
       color: #c8c8d4;
       font-family: ui-monospace, SFMono-Regular, monospace;
       font-size: 11px;
@@ -153,37 +139,15 @@
       overflow-x: auto;
       user-select: text;
     }
-    .file-card .body > .source:first-child { padding-top: 6px; }
-    .file-card .body > .source:last-child  { padding-bottom: 12px; }
-
-    /* Container mode: when an expanded node has captured children, its
-       body becomes a vertical stack of free-standing nested cards.
-       Padding and gap match CONTAINER-PAD/CONTAINER-GAP in file_card.cljs
-       so row-height math lines up with the rendered geometry. */
-    .file-card .body.container {
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+    /* Clickable call-sites inside a function's body. Blue + underline so
+       they read as hyperlinks; clicking spawns a new box for the callee. */
+    .file-card .source .call {
+      color: #8fa8ff;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
     }
-    .file-card .body.container > .row {
-      background: #ededf0;
-      border: 1px solid #0c0c12;
-      border-radius: 6px;
-      overflow: hidden;
-    }
-    .file-card .body.container > .row.expanded { background: #1c1c25; }
-    /* Suppress the global .row + .row top border inside containers — gap
-       between cards already separates them. */
-    .file-card .body.container > .row + .row { border-top: 1px solid #0c0c12; }
-    /* Splice-interstitial source: parent's own body text between nested
-       child cards. Uniform top/bottom padding so every text segment has
-       the same fixed height (6 + N·16 + 12), which is what row-height
-       math in file_card.cljs assumes. */
-    .file-card .body.container > .source {
-      padding: 6px 14px 12px 14px;
-      color: #c8c8d4;
-    }
+    .file-card .source .call:hover { color: #b3c4ff; }
     .file-card .path {
       margin-top: 8px;
       padding-left: 4px;
@@ -216,7 +180,7 @@
 </head>
 <body>
   <div id="hud"><span id="hud-file">loading…</span></div>
-  <div id="hint">drag to pan · pinch to zoom · click a function to reveal its source and callers/callees</div>
+  <div id="hint">drag to pan · pinch to zoom · click a blue call-link to spawn the callee · × to dismiss</div>
   <div id="app"></div>
 
   <script id="alon-graph" type="application/json">__ALON_GRAPH__</script>

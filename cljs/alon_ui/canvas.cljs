@@ -51,8 +51,8 @@
             {:style {:transform
                      (str "translate(" pan-x "px," pan-y "px) scale(" zoom ")")}}
             [edges/edges]
-            (for [file (keys shown)]
-              ^{:key file} [file-card/file-card file])]
+            (for [fn-id (keys shown)]
+              ^{:key fn-id} [file-card/fn-card fn-id])]
            [:button.fit-btn
             {:title "fit all cards to viewport"
              :on-mouse-down (fn [e] (.stopPropagation e))

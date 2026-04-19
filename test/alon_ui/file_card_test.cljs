@@ -3,139 +3,130 @@
             [alon-ui.state :as state]
             [alon-ui.file-card :as fc]))
 
-;; Utilities ----------------------------------------------------------------
+(defn- install-state! [nodes shown]
+  (reset! state/state
+          {:by-id         (into {} (map (juxt :id identity) nodes))
+           :edges-by-from {}
+           :width-by-id   (into {} (map (fn [n] [(:id n) 320])) nodes)
+           :height-by-id  {}
+           :shown         shown
+           :focused       (first (keys shown))
+           :trail         []
+           :pan-x 0 :pan-y 0 :zoom 1}))
 
-(defn- mk-node [id name start end source & {:keys [parent type file]
-                                              :or   {type "function"
-                                                     file "/fake/a.mjs"}}]
-  {:id id :name name :type type :source source :signature nil
-   :start start :end end :parentId parent :file file})
+;; ---- splice-calls --------------------------------------------------------
+;;
+;; splice-calls is the inline rendering primitive: for a function's source
+;; plus its outbound edges, it returns a sequence of text/call segments
+;; interleaved at call-site offsets. Call spans are clickable in the UI.
 
-(defn- install-state! [nodes expanded]
-  (let [by-id       (into {} (map (juxt :id identity) nodes))
-        children-of (->> nodes
-                         (filter :parentId)
-                         (group-by :parentId)
-                         (reduce-kv
-                          (fn [m pid xs] (assoc m pid (mapv :id (sort-by :start xs))))
-                          {}))
-        by-file     (->> nodes
-                         (remove :parentId)
-                         (group-by :file)
-                         (reduce-kv (fn [m f xs] (assoc m f (vec (sort-by :start xs)))) {}))]
+(deftest splice-calls-no-edges-returns-single-text
+  (testing "source with no outbound edges renders as a single :text chunk"
+    (is (= [{:kind :text :text "body"}]
+           (fc/splice-calls "body" [])))))
+
+(deftest splice-calls-nil-source-returns-empty
+  (testing "nil source (unknown body) collapses to no segments"
+    (is (= [] (fc/splice-calls nil [{:offsetStart 0 :offsetEnd 3}])))))
+
+(deftest splice-calls-interleaves-text-and-calls
+  (testing "one edge in the middle: [:text before] [:call span] [:text after]"
+    (let [src   "aa foo() bb"
+          ;; `foo(` begins at offset 3, closing `)` at offset 8. The full
+          ;; call expression "foo()" spans [3, 8).
+          edges [{:to "X" :offsetStart 3 :offsetEnd 8}]]
+      (is (= [{:kind :text :text "aa "}
+              {:kind :call :edge (first edges) :text "foo()"}
+              {:kind :text :text " bb"}]
+             (fc/splice-calls src edges))))))
+
+(deftest splice-calls-sorts-by-offset
+  (testing "edges given out of order are emitted in offset order"
+    (let [src "aa()bb()"
+          e2  {:to "Y" :offsetStart 4 :offsetEnd 8}
+          e1  {:to "X" :offsetStart 0 :offsetEnd 4}
+          segs (fc/splice-calls src [e2 e1])]
+      (is (= [:call :call] (map :kind segs)))
+      (is (= "aa()"  (:text (first segs))))
+      (is (= "bb()"  (:text (second segs)))))))
+
+(deftest splice-calls-skips-nested-inside-outer
+  (testing "overlapping calls: the outer (emitted first) wins and the inner is dropped"
+    (let [src "foo(bar())"
+          outer {:to "FOO" :offsetStart 0  :offsetEnd 10}
+          inner {:to "BAR" :offsetStart 4  :offsetEnd 9}
+          segs  (fc/splice-calls src [outer inner])]
+      (is (= 1 (count segs)))
+      (is (= :call (:kind (first segs))))
+      (is (= "foo(bar())" (:text (first segs)))))))
+
+(deftest splice-calls-clamps-runaway-offsets
+  (testing "offsets past end-of-source clamp so we don't throw"
+    (let [src   "abc"
+          edges [{:to "X" :offsetStart 1 :offsetEnd 999}]
+          segs  (fc/splice-calls src edges)]
+      (is (= [{:kind :text :text "a"}
+              {:kind :call :edge (first edges) :text "bc"}]
+             segs)))))
+
+;; ---- source-height -------------------------------------------------------
+
+(deftest source-height-blank
+  (testing "empty string sources contribute no height"
+    (is (zero? (fc/source-height ""))))
+  (testing "nil source contributes no height"
+    (is (zero? (fc/source-height nil)))))
+
+(deftest source-height-counts-newlines
+  (testing "height = top-pad + (lines * LINE-H) + bot-pad"
+    ;; 3 lines ("a", "b", "c") → pad-top + 3*LINE-H + pad-bot.
+    (is (= (+ fc/SOURCE-PAD-TOP (* 3 fc/LINE-H) fc/SOURCE-PAD-BOT)
+           (fc/source-height "a\nb\nc")))))
+
+;; ---- call-site-y ---------------------------------------------------------
+;;
+;; call-site-y is how edges.cljs anchors an arrow's tail at the exact line
+;; of a call-site inside a function's body. The math needs to match what
+;; CSS actually renders, because edges draw analytically (no DOM measure).
+
+(deftest call-site-y-first-line
+  (testing "offset 0 lands on the middle of the first source line"
+    (install-state!
+     [{:id "f" :name "f" :type "function" :parentId nil :file "/a.mjs"
+       :start 0 :end 10 :source "foo()\nbar()"}]
+     {"f" {:x 0 :y 0 :root? true}})
+    (is (= (+ fc/ROW-H fc/SOURCE-PAD-TOP (/ fc/LINE-H 2))
+           (fc/call-site-y "f" 0)))))
+
+(deftest call-site-y-later-line
+  (testing "offset on a later line advances by LINE-H per newline before it"
+    (install-state!
+     [{:id "f" :name "f" :type "function" :parentId nil :file "/a.mjs"
+       :start 0 :end 10 :source "foo()\nbar()"}]
+     {"f" {:x 0 :y 0 :root? true}})
+    ;; offset 6 is the 'b' in "bar()" — 1 newline before it, so line index 1.
+    (is (= (+ fc/ROW-H fc/SOURCE-PAD-TOP fc/LINE-H (/ fc/LINE-H 2))
+           (fc/call-site-y "f" 6)))))
+
+(deftest call-site-y-unshown-returns-nil
+  (testing "unshown box yields nil — edges.cljs uses that to skip the path"
+    (install-state!
+     [{:id "f" :name "f" :type "function" :parentId nil :file "/a.mjs"
+       :start 0 :end 10 :source "foo()"}]
+     {})
+    (is (nil? (fc/call-site-y "f" 0)))))
+
+;; ---- width-for ----------------------------------------------------------
+
+(deftest width-for-falls-back-to-card-width
+  (testing "missing width entry falls back to CARD-WIDTH constant"
+    (install-state! [] {})
+    (is (= fc/CARD-WIDTH (fc/width-for "unknown")))))
+
+(deftest width-for-uses-state-entry
+  (testing "explicit width in :width-by-id wins"
     (reset! state/state
-            {:by-id       by-id
-             :by-file     by-file
-             :children-of children-of
-             :expanded    (set expanded)
-             :shown       {"/fake/a.mjs" {:x 0 :y 0 :root? true}}
-             :width-by-file {"/fake/a.mjs" 320}})))
-
-;; ---- splice-source -------------------------------------------------------
-
-(deftest splice-source-leaf-emits-single-tail
-  (testing "leaf with no children: tail text falls through as one :text segment
-   (the caller never hits container mode for leaves — it keys off (seq kids))"
-    (let [leaf (mk-node "leaf" "leaf" 0 10 "body")]
-      (install-state! [leaf] #{"leaf"})
-      (is (= [[:text "body"]] (fc/splice-source leaf))))))
-
-(deftest splice-source-blank-leaf-emits-nothing
-  (testing "purely whitespace source gets dropped by meaningful-text?"
-    (let [leaf (mk-node "leaf" "leaf" 0 4 "    ")]
-      (install-state! [leaf] #{"leaf"})
-      (is (= [] (fc/splice-source leaf))))))
-
-(deftest splice-source-interleaves-text-and-children
-  (testing "parent source is sliced into [:text ...] around captured child holes"
-    (let [;; parent source: "AAAAkid1BBBBkid2CCCC" — child offsets are absolute
-          parent (mk-node "p" "p" 0 20 "AAAAkid1BBBBkid2CCCC")
-          k1     (mk-node "k1" "k1" 4 8 "kid1" :parent "p")
-          k2     (mk-node "k2" "k2" 12 16 "kid2" :parent "p")]
-      (install-state! [parent k1 k2] #{"p"})
-      (let [segs (fc/splice-source parent)]
-        (is (= [[:text "AAAA"] [:child "k1"]
-                [:text "BBBB"] [:child "k2"]
-                [:text "CCCC"]]
-               segs))))))
-
-(deftest splice-source-skips-blank-interstitials
-  (testing "whitespace-only text between children is dropped"
-    (let [parent (mk-node "p" "p" 0 16 "    kid1\n\n  kid2")
-          k1     (mk-node "k1" "k1" 4 8 "kid1" :parent "p")
-          k2     (mk-node "k2" "k2" 12 16 "kid2" :parent "p")]
-      (install-state! [parent k1 k2] #{"p"})
-      ;; No meaningful text before kid1 or between kids — only children emit
-      (is (= [[:child "k1"] [:child "k2"]]
-             (fc/splice-source parent))))))
-
-;; ---- row-height ---------------------------------------------------------
-
-(deftest row-height-collapsed
-  (testing "collapsed row is exactly ROW-H"
-    (let [n (mk-node "x" "x" 0 4 "body")]
-      (install-state! [n] #{})
-      (is (= fc/ROW-H (fc/row-height n))))))
-
-(deftest row-height-expanded-leaf
-  (testing "expanded leaf adds source-height to row-head"
-    (let [n (mk-node "x" "x" 0 4 "one")]
-      (install-state! [n] #{"x"})
-      (is (= (+ fc/ROW-H (fc/source-height "one"))
-             (fc/row-height n))))))
-
-(deftest row-height-expanded-container-uses-segments
-  (testing "container mode accounts for CONTAINER-PAD on both ends + gap between segs"
-    (let [parent (mk-node "p" "p" 0 12 "AAAAkid1BBBB")
-          k1     (mk-node "k1" "k1" 4 8 "kid1" :parent "p")]
-      (install-state! [parent k1] #{"p"})
-      ;; segs = [:text "AAAA"] [:child k1] [:text "BBBB"] = 3 segments
-      (let [expected-body (+ fc/CONTAINER-PAD
-                             (fc/source-height "AAAA")
-                             (fc/row-height k1)
-                             (fc/source-height "BBBB")
-                             (* 2 fc/CONTAINER-GAP)
-                             fc/CONTAINER-PAD)]
-        (is (= (+ fc/ROW-H expected-body)
-               (fc/row-height parent)))))))
-
-;; ---- row-top-y ---------------------------------------------------------
-
-(deftest row-top-y-top-level-siblings-stack
-  (testing "top-level sibling ys sum preceding row-heights"
-    (let [a (mk-node "a" "a" 0  4 "aa")   ; row-head only (collapsed)
-          b (mk-node "b" "b" 4  8 "bb")
-          c (mk-node "c" "c" 8 12 "cc")]
-      (install-state! [a b c] #{})
-      (is (= 0                 (fc/row-top-y "a")))
-      (is (= fc/ROW-H          (fc/row-top-y "b")))
-      (is (= (* 2 fc/ROW-H)    (fc/row-top-y "c"))))))
-
-(deftest row-top-y-nested-under-expanded-parent
-  (testing "nested row lives at parent-top + ROW-H + CONTAINER-PAD + preceding splice height"
-    (let [parent (mk-node "p" "p" 0 12 "AAAAkid1BBBB")
-          k1     (mk-node "k1" "k1" 4 8 "kid1" :parent "p")]
-      (install-state! [parent k1] #{"p"})
-      ;; segs: [:text "AAAA"] [:child k1] [:text "BBBB"]
-      ;; y-before-child walks: seg 0 (:text "AAAA") adds source-height + gap;
-      ;; then seg 1 is our :child — stop.
-      (let [expected (+ 0                              ; parent top
-                        fc/ROW-H                       ; past parent head
-                        fc/CONTAINER-PAD               ; body top padding
-                        (fc/source-height "AAAA")      ; preceding text
-                        fc/CONTAINER-GAP)]             ; gap after it
-        (is (= expected (fc/row-top-y "k1")))))))
-
-;; ---- row-depth / row-x-inset -------------------------------------------
-
-(deftest row-depth-counts-ancestors
-  (let [a (mk-node "a" "a" 0 10 "x")
-        b (mk-node "b" "b" 2  4 "y" :parent "a")
-        c (mk-node "c" "c" 3  3 "z" :parent "b")]
-    (install-state! [a b c] #{"a" "b"})
-    (is (= 0 (fc/row-depth "a")))
-    (is (= 1 (fc/row-depth "b")))
-    (is (= 2 (fc/row-depth "c")))
-    (is (= 0                       (fc/row-x-inset "a")))
-    (is (= fc/CONTAINER-PAD        (fc/row-x-inset "b")))
-    (is (= (* 2 fc/CONTAINER-PAD)  (fc/row-x-inset "c")))))
+            {:by-id {} :edges-by-from {} :width-by-id {"f" 512}
+             :height-by-id {} :shown {} :focused nil :trail []
+             :pan-x 0 :pan-y 0 :zoom 1})
+    (is (= 512 (fc/width-for "f")))))

@@ -4,62 +4,36 @@
 
 (def OFFSET 10000)
 
-(defn- visible?
-  "A node is rendered iff every ancestor in its chain is in :expanded."
-  [s node-id]
-  (loop [id node-id]
-    (let [pid (:parentId (get-in s [:by-id id]))]
-      (cond
-        (nil? pid) true
-        (not (contains? (:expanded s) pid)) false
-        :else (recur pid)))))
+(defn- box-anchor
+  "Endpoint on `fn-id`'s box edge, picking the side closest to `other-cx`.
+   Vertical anchor is the row-head center so arrowheads land on the title."
+  [fn-id other-cx]
+  (let [s @state/state]
+    (when-let [pos (get-in s [:shown fn-id])]
+      (let [w      (fc/width-for fn-id)
+            left   (:x pos)
+            right  (+ left w)
+            center (/ (+ left right) 2)
+            right? (>= other-cx center)
+            x      (if right? right left)
+            y      (+ (:y pos) (/ fc/ROW-H 2))]
+        {:x x :y y :right? right?}))))
 
-(defn- nearest-visible-id
-  "Climb until we hit a node that is actually rendered. Falls back to the
-   nearest visible ancestor when the requested node is hidden inside a
-   collapsed parent — otherwise row-top-y returns a phantom y far below
-   the visible card."
-  [s node-id]
-  (loop [id node-id]
-    (cond
-      (nil? id) nil
-      (visible? s id) id
-      :else (recur (:parentId (get-in s [:by-id id]))))))
-
-(defn- ancestor?
-  "True if `a` is an ancestor of `d` in the captured-fn tree."
-  [s a d]
-  (loop [id d]
-    (let [pid (:parentId (get-in s [:by-id id]))]
-      (cond
-        (nil? pid) false
-        (= pid a)  true
-        :else      (recur pid)))))
-
-(defn- anchor
-  "Compute endpoint {:x :y :right?} for `node-id` relative to `other-center-x`.
-   In container mode, nested rows live inset from the file-card edge by
-   their depth × CONTAINER-PAD on each side, so anchor at that nested edge
-   instead of the outer file-card border. If `offset` is provided and the
-   node's source is actually rendered (expanded leaf, not collapsed/container),
-   anchor to that call-site line instead of the row-head center."
-  [node-id other-center-x & [offset]]
-  (let [s @state/state
-        vis-id (nearest-visible-id s node-id)
-        n      (get-in s [:by-id vis-id])]
-    (when n
-      (when-let [pos (get-in s [:shown (:file n)])]
-        (let [card-w     (fc/width-for (:file n))
-              inset      (fc/row-x-inset vis-id)
-              row-left   (+ (:x pos) inset)
-              row-right  (+ (:x pos) (- card-w inset))
-              row-center (/ (+ row-left row-right) 2)
-              right?     (>= other-center-x row-center)
-              x          (if right? row-right row-left)
-              call-y     (when (and offset (= vis-id node-id))
-                           (fc/call-site-y node-id offset))
-              y-local    (or call-y (fc/row-y-center vis-id))]
-          {:x x :y (+ (:y pos) y-local) :right? right?})))))
+(defn- call-anchor
+  "Tail anchor at the line of the call-site inside `from-id`'s body. X
+   hugs the nearer box edge; Y sits on the vertical center of the line."
+  [from-id edge other-cx]
+  (let [s @state/state]
+    (when-let [pos (get-in s [:shown from-id])]
+      (let [w      (fc/width-for from-id)
+            left   (:x pos)
+            right  (+ left w)
+            center (/ (+ left right) 2)
+            right? (>= other-cx center)
+            x      (if right? right left)
+            y      (fc/call-site-y from-id (:offsetStart edge))]
+        (when y
+          {:x x :y y :right? right?})))))
 
 (defn- bezier [ax ay a-right? bx by b-right?]
   (let [dx  (Math/abs (- bx ax))
@@ -72,7 +46,14 @@
          ", " (+ bx OFFSET) " " (+ by OFFSET))))
 
 (defn edges []
-  (let [s @state/state]
+  (let [s      @state/state
+        shown  (:shown s)
+        eb     (:edges-by-from s)
+        visible (for [[from-id es] eb
+                      :when (contains? shown from-id)
+                      e es
+                      :when (contains? shown (:to e))]
+                  [from-id e])]
     [:svg.edges {:xmlns "http://www.w3.org/2000/svg"}
      [:defs
       [:marker {:id "arrow" :viewBox "0 0 10 10"
@@ -81,24 +62,17 @@
                 :orient "auto-start-reverse"}
        [:path {:d "M 0 0 L 10 5 L 0 10 z"
                :fill "#5a8aff" :opacity 0.9}]]]
-     (for [{:keys [from to type offsetStart]} (get-in s [:graph :edges])
-           :let [fn'  (get-in s [:by-id from])
-                 tn   (get-in s [:by-id to])
-                 fpos (get-in s [:shown (:file fn')])
-                 tpos (get-in s [:shown (:file tn)])]
-           ;; Suppress parent⇄child edges: containment IS the relationship,
-           ;; an arrow swooping into the box that already holds the target
-           ;; just adds noise.
-           :when (and fn' tn fpos tpos
-                      (not (ancestor? s from to))
-                      (not (ancestor? s to from)))
-           :let [t-cx (+ (:x tpos) (/ (fc/width-for (:file tn)) 2))
-                 f-cx (+ (:x fpos) (/ (fc/width-for (:file fn')) 2))
-                 a (anchor from t-cx offsetStart)
-                 b (anchor to   f-cx)]
+     (for [[from-id e] visible
+           :let [to-id (:to e)
+                 tpos  (get shown to-id)
+                 fpos  (get shown from-id)
+                 t-cx  (+ (:x tpos) (/ (fc/width-for to-id) 2))
+                 f-cx  (+ (:x fpos) (/ (fc/width-for from-id) 2))
+                 a     (call-anchor from-id e t-cx)
+                 b     (box-anchor  to-id   f-cx)]
            :when (and a b)]
-       ^{:key (str from "→" to)}
+       ^{:key (str from-id "→" to-id "@" (:offsetStart e))}
        [:path {:d (bezier (:x a) (:y a) (:right? a)
                           (:x b) (:y b) (:right? b))
-               :class type
+               :class (or (:type e) "call")
                :marker-end "url(#arrow)"}])]))
