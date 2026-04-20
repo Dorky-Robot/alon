@@ -115,6 +115,48 @@
 (defn- advance-by [line text]
   (+ line (count-newlines text)))
 
+(defn- candidate->segment
+  "Expand a candidate into its full display segment, given the offset
+   `os` at which its prefix text starts, the source it slices from, and
+   the display line its first char lands on."
+  [R-source c line]
+  (let [{:keys [os oe]} c]
+    (case (:kind c)
+      :call
+      {:kind :call :os os :oe oe :edge (:edge c)
+       :text (subs R-source os oe)
+       :line-start line}
+
+      :nested-collapsed
+      {:kind :nested-collapsed :os os :oe oe :node (:node c)
+       :text (nested-sig (:node c) R-source os oe)
+       :line-start line}
+
+      :nested-expander
+      ;; Zero-length: the body passes through as text/calls and the ▾
+      ;; sits just before the `function` keyword.
+      {:kind :nested-expander :os os :oe os :node (:node c)
+       :text "▾" :line-start line})))
+
+(defn- step-candidate
+  "Reducer step: extend the accumulating plan with any gap-text before
+   `c` and `c`'s own segment. Drops `c` when it overlaps a segment already
+   emitted (a call-site inside a collapsed nested's range, for instance)."
+  [R-source {:keys [cur line acc] :as acc-state} c]
+  (let [os (:os c)]
+    (if (< os cur)
+      acc-state
+      (let [before (subs R-source cur os)
+            acc1   (cond-> acc
+                     (pos? (count before))
+                     (conj {:kind :text :os cur :oe os
+                            :text before :line-start line}))
+            line1  (advance-by line before)
+            seg    (candidate->segment R-source c line1)]
+        {:cur (:oe seg)
+         :line (advance-by line1 (:text seg))
+         :acc (conj acc1 seg)}))))
+
 (defn plan-for
   "Build a segment plan for rendering renderable R's source given call
    edges (already lifted to R-local offsets) and its nested descendants.
@@ -132,7 +174,8 @@
   [R-source edges nested-kids]
   (if-not (string? R-source)
     []
-    (let [collapsed-ranges (for [k nested-kids :when (:collapsed? k)]
+    (let [len (count R-source)
+          collapsed-ranges (for [k nested-kids :when (:collapsed? k)]
                              [(:os k) (:oe k)])
           inside-collapsed? (fn [o]
                               (some (fn [[ns ne]] (and (<= ns o) (< o ne)))
@@ -141,53 +184,25 @@
                            :let [os (:offsetStart e)
                                  oe (:offsetEnd   e)]
                            :when (and os oe
-                                      (<= 0 os) (<= oe (count R-source))
+                                      (<= 0 os) (<= oe len)
                                       (< os oe)
                                       (not (inside-collapsed? os)))]
                        {:kind :call :os os :oe oe :edge e})
           nested-cands (for [{:keys [node os oe collapsed?]} nested-kids
-                             :when (and os oe (<= 0 os) (< os oe)
-                                        (<= oe (count R-source)))]
+                             :when (and os oe (<= 0 os) (< os oe) (<= oe len))]
                          (if collapsed?
                            {:kind :nested-collapsed :os os :oe oe :node node}
-                           ;; Zero-length: the body passes through as text/calls
-                           ;; and the ▾ sits just before the `function` keyword.
                            {:kind :nested-expander  :os os :oe os :node node}))
-          candidates (vec (sort-by :os (concat nested-cands call-cands)))
-          len        (count R-source)]
-      (loop [cs candidates, cur 0, line 0, acc []]
-        (if-let [c (first cs)]
-          (let [os (:os c), oe (:oe c)]
-            (if (< os cur)
-              ;; Overlap with an already-emitted segment — drop this candidate.
-              (recur (rest cs) cur line acc)
-              (let [before (subs R-source cur os)
-                    acc1   (if (pos? (count before))
-                             (conj acc {:kind :text :os cur :oe os
-                                        :text before :line-start line})
-                             acc)
-                    line1  (advance-by line before)
-                    seg (case (:kind c)
-                          :call
-                          {:kind :call :os os :oe oe :edge (:edge c)
-                           :text (subs R-source os oe)
-                           :line-start line1}
-                          :nested-collapsed
-                          {:kind :nested-collapsed :os os :oe oe :node (:node c)
-                           :text (nested-sig (:node c) R-source os oe)
-                           :line-start line1}
-                          :nested-expander
-                          {:kind :nested-expander :os os :oe os :node (:node c)
-                           :text "▾" :line-start line1})
-                    ;; Advance: collapsed pills compress multi-line body into
-                    ;; one display line; expanders are zero-width (no advance).
-                    line2 (advance-by line1 (:text seg))]
-                (recur (rest cs) oe line2 (conj acc1 seg)))))
-          (let [tail (subs R-source cur len)]
-            (cond-> acc
-              (pos? (count tail))
-              (conj {:kind :text :os cur :oe len
-                     :text tail :line-start line}))))))))
+          candidates (sort-by :os (concat nested-cands call-cands))
+          {:keys [cur line acc]}
+          (reduce (partial step-candidate R-source)
+                  {:cur 0 :line 0 :acc []}
+                  candidates)
+          tail (subs R-source cur len)]
+      (cond-> acc
+        (pos? (count tail))
+        (conj {:kind :text :os cur :oe len
+               :text tail :line-start line})))))
 
 (defn- compute-plan
   "Collect what plan-for needs for a renderable fn-id from the current

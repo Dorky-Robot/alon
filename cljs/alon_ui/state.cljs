@@ -22,10 +22,18 @@
 ;;    :trail         [fn-id ...]
 ;;    :pan-x N :pan-y N :zoom N}
 ;;
-;; The canvas renders one box per function. Clicking a blue call-link in a
-;; function's source spawns the callee as its own box with an arrow anchored
-;; at the call-site. No file cards, no nested splicing — each box is just one
-;; function's own source.
+;; Code organization is pure-core / impure-rim:
+;;
+;;   • Pure helpers (renderable?, rewrite-edges, reflow-shown, focus, dismiss,
+;;     spawn-call, toggle-nested, double-tap-node, set-measured-height) take
+;;     a state map and return the next state map. They compose via `->`.
+;;
+;;   • Effect wrappers (focus!, dismiss!, spawn-call!, …) are thin shells:
+;;     `(swap! state pure-fn args...)`, then call refit! if the identity of
+;;     the state ref actually moved. Exactly one atom write per user action.
+;;
+;; Camera animation and DOM measurement live at the effect boundary too —
+;; rAF ticks and `.-innerWidth` reads are genuinely stateful.
 
 (def ^:private CHAR-W      6.6)
 (def ^:private SOURCE-PAD  28)
@@ -110,28 +118,15 @@
 (def ^:private CARD-STACK-GAP 40)
 (def ^:private CARD-FALLBACK-H 160)
 
-(defn card-height-est [fn-id]
-  (or (get-in @state [:height-by-id fn-id]) CARD-FALLBACK-H))
+(defn- height-of
+  "Measured height, or CARD-FALLBACK-H until the DOM reports one."
+  [height-by-id fn-id]
+  (or (get height-by-id fn-id) CARD-FALLBACK-H))
 
-(declare reflow! animate-to-fit! refit!)
-
-(defn set-measured-height! [fn-id h]
-  (let [cur (get-in @state [:height-by-id fn-id])]
-    (when (and h (or (nil? cur) (not= (int cur) (int h))))
-      (swap! state assoc-in [:height-by-id fn-id] h)
-      (reflow!)
-      (refit!))))
-
-(defn- next-y-below-siblings
-  "Lowest free y in the lane spawned by `opener-id`. New children of the
-   same opener cascade below previously-spawned ones."
-  [shown opener-id fallback-y]
-  (let [sibs (filter (fn [[_ pos]] (= (:opened-by pos) opener-id)) shown)]
-    (if (empty? sibs)
-      fallback-y
-      (apply max (map (fn [[id pos]]
-                        (+ (:y pos) (card-height-est id) CARD-STACK-GAP))
-                      sibs)))))
+(defn card-height-est
+  "Public accessor for file-card geometry. Reads from the current state."
+  [fn-id]
+  (height-of (:height-by-id @state) fn-id))
 
 (defn- card-depth [shown fn-id]
   (loop [id fn-id, d 0]
@@ -139,43 +134,58 @@
       (recur opener (inc d))
       d)))
 
-(defn reflow!
-  "Re-stack children of each opener in y order so a box that grew taller
-   pushes its siblings down. Root boxes keep their position. Openers are
-   processed outermost-first so each lane sees its opener's updated pos."
-  []
-  (let [s     @state
-        shown (:shown s)
-        non-root (filter (fn [[_ pos]] (some? (:opened-by pos))) shown)
-        lanes    (group-by (fn [[_ pos]] (:opened-by pos)) non-root)
-        ordered  (sort-by (fn [opener] (card-depth shown opener)) (keys lanes))
-        roots    (into {} (filter (fn [[_ pos]] (nil? (:opened-by pos))) shown))]
-    (loop [ks ordered, result roots]
-      (if (empty? ks)
-        (swap! state assoc :shown result)
-        (let [opener     (first ks)
-              cards      (get lanes opener)
-              opener-pos (get result opener)
-              opener-w   (or (get-in s [:width-by-id opener]) 0)
-              ordered-cs (sort-by (fn [[_ pos]] (:y pos)) cards)
-              fallback-y (or (:y opener-pos) 0)
-              [placed _]
-              (reduce (fn [[acc y] [id pos]]
-                        (let [h     (card-height-est id)
-                              new-x (+ (:x opener-pos) opener-w CARD-COL-GAP)]
-                          [(assoc acc id (assoc pos :x new-x :y y))
-                           (+ y h CARD-STACK-GAP)]))
-                      [{} fallback-y]
-                      ordered-cs)]
-          (recur (rest ks) (merge result placed)))))))
+(defn- next-y-below-siblings
+  "Lowest free y in the lane spawned by `opener-id`. New children of the
+   same opener cascade below previously-spawned ones."
+  [shown height-by-id opener-id fallback-y]
+  (->> shown
+       (filter (fn [[_ pos]] (= (:opened-by pos) opener-id)))
+       (map (fn [[id pos]] (+ (:y pos) (height-of height-by-id id) CARD-STACK-GAP)))
+       (reduce max fallback-y)))
+
+(defn- place-lane
+  "Pure: stack a lane of cards vertically below their opener's position.
+   Returns a map of {id pos} for just the placed cards."
+  [opener-pos opener-w height-by-id lane-cards]
+  (let [new-x   (+ (:x opener-pos) opener-w CARD-COL-GAP)
+        ordered (sort-by (fn [[_ pos]] (:y pos)) lane-cards)]
+    (first
+     (reduce (fn [[acc y] [id pos]]
+               [(assoc acc id (assoc pos :x new-x :y y))
+                (+ y (height-of height-by-id id) CARD-STACK-GAP)])
+             [{} (or (:y opener-pos) 0)]
+             ordered))))
+
+(defn- reflow-shown
+  "Pure: re-stack each lane below its opener so taller cards push siblings
+   down. Root boxes keep their position. Openers are processed outermost-
+   first so each lane sees its opener's already-updated position."
+  [shown width-by-id height-by-id]
+  (let [non-root        (filter (fn [[_ pos]] (some? (:opened-by pos))) shown)
+        lanes           (group-by (fn [[_ pos]] (:opened-by pos)) non-root)
+        ordered-openers (sort-by #(card-depth shown %) (keys lanes))
+        roots           (into {} (filter (fn [[_ pos]] (nil? (:opened-by pos))) shown))]
+    (reduce
+     (fn [result opener]
+       (let [opener-pos (get result opener)
+             opener-w   (or (get width-by-id opener) 0)
+             placed     (place-lane opener-pos opener-w height-by-id
+                                    (get lanes opener))]
+         (merge result placed)))
+     roots
+     ordered-openers)))
+
+(defn- reflow
+  "Apply reflow-shown to the :shown map in `s`."
+  [s]
+  (assoc s :shown (reflow-shown (:shown s) (:width-by-id s) (:height-by-id s))))
 
 ;; --- Camera tween ---------------------------------------------------------
 
-(defn- bbox-of-shown []
-  (let [s @state
-        rects (for [[id pos] (:shown s)
+(defn- bbox-of-shown [s]
+  (let [rects (for [[id pos] (:shown s)
                     :let [w (or (get-in s [:width-by-id id]) 320)
-                          h (card-height-est id)]]
+                          h (height-of (:height-by-id s) id)]]
                 [(:x pos) (:y pos) (+ (:x pos) w) (+ (:y pos) h)])]
     (when (seq rects)
       (let [x1 (apply min (map #(nth % 0) rects))
@@ -184,6 +194,16 @@
             y2 (apply max (map #(nth % 3) rects))]
         {:cx (/ (+ x1 x2) 2) :cy (/ (+ y1 y2) 2)
          :w  (- x2 x1)        :h  (- y2 y1)}))))
+
+(defn- bbox-of-node [s fn-id]
+  (when-let [pos (get-in s [:shown fn-id])]
+    (let [w (or (get-in s [:width-by-id fn-id]) 320)
+          h (height-of (:height-by-id s) fn-id)]
+      {:cx (+ (:x pos) (/ w 2))
+       :cy (+ (:y pos) (/ h 2))
+       :w  w :h  h
+       :top (:y pos)
+       :bot (+ (:y pos) h)})))
 
 (defn- ease-out-cubic [t] (- 1 (Math/pow (- 1 t) 3)))
 
@@ -209,7 +229,7 @@
 (defn animate-to-fit!
   ([] (animate-to-fit! 380))
   ([duration-ms]
-   (when-let [bb (bbox-of-shown)]
+   (when-let [bb (bbox-of-shown @state)]
      (let [vw (.-innerWidth js/window)
            vh (.-innerHeight js/window)
            pad 100
@@ -221,21 +241,8 @@
            ty (- (* (:cy bb) tz))]
        (animate-to! tx ty tz duration-ms)))))
 
-(defn- bbox-of-node [fn-id]
-  (let [s @state
-        pos (get-in s [:shown fn-id])
-        w   (or (get-in s [:width-by-id fn-id]) 320)
-        h   (card-height-est fn-id)]
-    (when pos
-      {:cx (+ (:x pos) (/ w 2))
-       :cy (+ (:y pos) (/ h 2))
-       :w  w
-       :h  h
-       :top (:y pos)
-       :bot (+ (:y pos) h)})))
-
-(defn- viewport-center-world-y []
-  (let [{:keys [pan-y zoom]} @state]
+(defn- viewport-center-world-y [s]
+  (let [{:keys [pan-y zoom]} s]
     (if (and zoom (not (zero? zoom)))
       (/ (- pan-y) zoom)
       0)))
@@ -252,178 +259,207 @@
       0)))
 
 (defn animate-to-node!
-  "Solo-mode fit. Fits the node on WIDTH (capped at 1.0 so text stays
-   naturally readable — long function bodies used to zoom out so far
-   they were unreadable). If the node's scaled height still exceeds
-   the viewport, vertically anchor on `anchor-y` (a world-Y, typically
-   the user's click point) clamped to the node's own top/bottom so we
-   never show whitespace around the card. Short nodes just center."
+  "Solo-mode fit. Fits the node on WIDTH (capped at 2.0 so a narrow card
+   doesn't blow up on a wide display, but text can scale well past the
+   1.0 baseline). If the node's scaled height still exceeds the viewport,
+   vertically anchor on `anchor-y` (a world-Y, typically the user's click
+   point) clamped to the node's own top/bottom so we never show whitespace
+   around the card. Short nodes just center."
   ([fn-id] (animate-to-node! fn-id 380 nil))
   ([fn-id duration-ms] (animate-to-node! fn-id duration-ms nil))
   ([fn-id duration-ms anchor-y]
-   (when-let [bb (bbox-of-node fn-id)]
+   (when-let [bb (bbox-of-node @state fn-id)]
      (let [vw       (.-innerWidth js/window)
            vh       (.-innerHeight js/window)
            pad      40
-           ;; Fit on width so card fills most of the viewport. Cap at 2.0
-           ;; so a narrow card doesn't blow up to wall-of-text on a wide
-           ;; display, but the text scales well past the 1.0 "natural size"
-           ;; baseline — source font is small for compactness, not display.
            tz       (-> (/ (- vw (* 2 pad)) (max 1 (:w bb)))
                         (min 2.0)
                         (max 0.2))
            scaled-h (* (:h bb) tz)
-           ;; World-y half-viewport at target zoom.
            half-vh  (/ vh (* 2 tz))
            center-y (if (<= scaled-h vh)
                       (:cy bb)
-                      (let [raw (or anchor-y (+ (:top bb) half-vh))]
-                        (-> raw
-                            (max (+ (:top bb) half-vh))
-                            (min (- (:bot bb) half-vh)))))
+                      (-> (or anchor-y (+ (:top bb) half-vh))
+                          (max (+ (:top bb) half-vh))
+                          (min (- (:bot bb) half-vh))))
            tx       (- (* (:cx bb) tz))
            ty       (- (* center-y tz))]
        (animate-to! tx ty tz duration-ms)))))
 
 (defn refit!
-  "Re-run the camera fit according to the current :fit-mode. Call this
-   after any state change that affects what should be framed — layout
-   (reflow, resize), the shown set (spawn/dismiss), or :focused in
-   solo mode. Pan/zoom mutations are manual overrides and deliberately
-   do NOT call refit! — the next real layout change will reassert the
-   mode's invariant.
+  "Re-run the camera fit according to the current :fit-mode. Call after
+   any state change that affects what should be framed — layout (reflow,
+   resize), the shown set (spawn/dismiss), or :focused in solo mode.
+   Pan/zoom mutations are manual overrides and deliberately do NOT call
+   refit! — the next real layout change will reassert the mode's invariant.
 
-   `anchor-y` (optional world-Y) biases the solo-mode vertical framing on
-   tall nodes. If omitted, we reuse the current viewport-center world-Y
-   so passive refits (height measurements, collapse/expand) keep the
-   user near where they were looking instead of snapping to the top.
-
-   :all  → fit everything
-   :solo → fit :focused if it's on the canvas; fall through to :all
-           (so dismissing the solo target to nothing doesn't leave
-            the camera stranded)"
+   `anchor-y` (optional world-Y) biases solo-mode vertical framing on tall
+   nodes. If omitted, we reuse the current viewport-center world-Y so
+   passive refits (height measurements, collapse/expand) keep the user
+   near where they were looking instead of snapping to the top."
   ([] (refit! nil))
   ([anchor-y]
    (let [s @state]
      (case (:fit-mode s)
        :solo (let [f (:focused s)
-                   a (or anchor-y (viewport-center-world-y))]
+                   a (or anchor-y (viewport-center-world-y s))]
                (if (and f (contains? (:shown s) f))
                  (animate-to-node! f 380 a)
                  (animate-to-fit!)))
        :all  (animate-to-fit!)
        nil))))
 
-;; --- Navigation -----------------------------------------------------------
+;; --- Pure state transitions ----------------------------------------------
+;;
+;; Each transition is a pure (state, args) -> state fn. Callers compose
+;; them with `->`. The matching imperative `foo!` wrappers below do the
+;; swap and then trigger any side effect (refit!) that the transition
+;; implies, only if the state actually changed.
 
-(defn focus!
-  "Mark `fn-id` as the current you-are-here. Trail pushes the previously
-   focused box; clicking a node already in the trail jumps back and truncates.
-   In :solo mode, focusing a different node re-fits the camera onto it — that's
-   how 'single-tap in solo mode zooms to the tapped node' is implemented.
+(defn- focus
+  "Make `fn-id` the focused card and push the previously focused one onto
+   the trail (or truncate the trail if we're jumping back). No-op if the
+   target isn't on the canvas."
+  [s fn-id]
+  (if-not (and fn-id (contains? (:shown s) fn-id))
+    s
+    (let [{:keys [focused trail]} s
+          in-trail-idx (first (keep-indexed (fn [i id] (when (= id fn-id) i)) trail))]
+      (assoc s
+             :focused fn-id
+             :trail   (cond
+                        in-trail-idx                       (vec (subvec trail 0 in-trail-idx))
+                        (and focused (not= focused fn-id)) (conj trail focused)
+                        :else                              trail)))))
 
-   `anchor-y` (optional world-Y) biases solo-mode vertical framing on tall
-   nodes — see refit!."
-  ([fn-id] (focus! fn-id nil))
-  ([fn-id anchor-y]
-   (when (and fn-id (contains? (:shown @state) fn-id))
-     (let [{:keys [focused trail]} @state
-           in-trail-idx (first (keep-indexed (fn [i id] (when (= id fn-id) i)) trail))]
-       (swap! state assoc
-              :focused fn-id
-              :trail   (cond
-                         in-trail-idx (vec (subvec trail 0 in-trail-idx))
-                         (and focused (not= focused fn-id)) (conj trail focused)
-                         :else trail))
-       (refit! anchor-y)))))
+(defn- spawn-call
+  "Add `to-id` as a box spawned by `from-id` (or share the existing box if
+   it's already on the canvas) and focus it. Also reflows so siblings
+   push down."
+  [s from-id to-id]
+  (let [shown (:shown s)]
+    (if (or (nil? from-id) (nil? to-id) (= from-id to-id)
+            (not (contains? shown from-id)))
+      s
+      (-> (if (contains? shown to-id)
+            s
+            (let [from-pos (get shown from-id)
+                  from-w   (or (get-in s [:width-by-id from-id]) 320)
+                  x (+ (:x from-pos) from-w CARD-COL-GAP)
+                  y (next-y-below-siblings shown (:height-by-id s)
+                                           from-id (:y from-pos))]
+              (assoc-in s [:shown to-id]
+                        {:x x :y y :opened-by from-id :root? false})))
+          (focus to-id)
+          reflow))))
 
-(defn spawn-call!
-  "Reveal `to-id` in a new box anchored to the right of `from-id`. If the
-   callee is already shown somewhere, we share that existing box — one
-   function = one box, regardless of how many call-sites point at it."
-  [from-id to-id]
-  (let [s @state]
-    (when (and from-id to-id (not= from-id to-id))
-      (when-not (contains? (:shown s) to-id)
-        (let [from-pos (get-in s [:shown from-id])
-              from-w   (or (get-in s [:width-by-id from-id]) 320)
-              x (+ (:x from-pos) from-w CARD-COL-GAP)
-              y (next-y-below-siblings (:shown s) from-id (:y from-pos))]
-          (swap! state assoc-in [:shown to-id]
-                 {:x x :y y :opened-by from-id :root? false})))
-      (focus! to-id)
-      (reflow!)
-      (refit!))))
+(defn- doomed-from
+  "Pure: set of shown ids transitively spawned by `root-id` (inclusive)."
+  [shown root-id]
+  (loop [acc #{root-id} frontier #{root-id}]
+    (if (empty? frontier)
+      acc
+      (let [kids (into #{}
+                       (keep (fn [[id pos]]
+                               (when (and (contains? frontier (:opened-by pos))
+                                          (not (contains? acc id)))
+                                 id)))
+                       shown)]
+        (recur (into acc kids) kids)))))
 
-(defn dismiss!
-  "Remove `fn-id` and every box it transitively spawned. Focus jumps back
+(defn- dismiss
+  "Remove `fn-id` and everything it transitively spawned. Focus jumps back
    to the opener of the dismissed box (or any surviving box)."
-  [fn-id]
-  (let [s @state
-        {:keys [shown focused trail]} s]
-    (when (contains? shown fn-id)
-      (let [doomed (loop [acc #{fn-id}, frontier [fn-id]]
-                     (if (empty? frontier)
-                       acc
-                       (let [next-frontier
-                             (->> shown
-                                  (keep (fn [[id pos]]
-                                          (when (and (contains? (set frontier)
-                                                                (:opened-by pos))
-                                                     (not (contains? acc id)))
-                                            id))))]
-                         (recur (into acc next-frontier)
-                                (vec next-frontier)))))
-            new-shown (into {} (remove (fn [[id _]] (contains? doomed id))) shown)
+  [s fn-id]
+  (let [{:keys [shown focused trail]} s]
+    (if-not (contains? shown fn-id)
+      s
+      (let [doomed      (doomed-from shown fn-id)
+            new-shown   (into {} (remove (comp doomed key)) shown)
             new-focused (if (contains? doomed focused)
                           (let [opener (:opened-by (get shown fn-id))]
                             (if (contains? new-shown opener)
                               opener
                               (first (keys new-shown))))
                           focused)]
-        (swap! state assoc
-               :shown   new-shown
-               :focused new-focused
-               :trail   (vec (remove doomed trail)))
-        (reflow!)
-        (refit!)))))
+        (-> s
+            (assoc :shown   new-shown
+                   :focused new-focused
+                   :trail   (vec (remove doomed trail)))
+            reflow)))))
+
+(defn- toggle-nested
+  "Flip the Xcode-style disclosure on a nested function."
+  [s nested-id]
+  (if-not nested-id
+    s
+    (-> s
+        (update :expanded-nested
+                (fn [xs]
+                  (let [xs (or xs #{})]
+                    (if (contains? xs nested-id)
+                      (disj xs nested-id)
+                      (conj xs nested-id)))))
+        reflow)))
+
+(defn- double-tap-node
+  "Toggle between :all and :solo. Entering :solo focuses `fn-id`; exiting
+   leaves :focused alone (so re-entering :solo later remembers what you
+   were looking at)."
+  [s fn-id]
+  (cond
+    (not (contains? (:shown s) fn-id)) s
+    (= :solo (:fit-mode s))             (assoc s :fit-mode :all)
+    :else (-> s (assoc :fit-mode :solo) (focus fn-id))))
+
+(defn- set-measured-height
+  "Record a DOM-measured height; reflow since the lane may need re-stacking."
+  [s fn-id h]
+  (let [cur (get-in s [:height-by-id fn-id])]
+    (if (and h (or (nil? cur) (not= (int cur) (int h))))
+      (-> s
+          (assoc-in [:height-by-id fn-id] h)
+          reflow)
+      s)))
+
+;; --- Effect wrappers (swap once; refit if anything moved) ----------------
+
+(defn- change!
+  "Apply a pure transition to the state atom. If it changes the map's
+   identity, also call refit! with the given anchor. Returns true iff
+   the state was updated — handy in tests."
+  [tx anchor-y]
+  (let [before @state
+        after  (swap! state tx)]
+    (when-not (identical? before after)
+      (refit! anchor-y)
+      true)))
+
+(defn focus!
+  ([fn-id] (focus! fn-id nil))
+  ([fn-id anchor-y]
+   (change! #(focus % fn-id) anchor-y)))
+
+(defn spawn-call! [from-id to-id]
+  (change! #(spawn-call % from-id to-id) nil))
+
+(defn dismiss! [fn-id]
+  (change! #(dismiss % fn-id) nil))
+
+(defn toggle-nested! [nested-id]
+  (change! #(toggle-nested % nested-id) nil))
+
+(defn double-tap-node!
+  ([fn-id] (double-tap-node! fn-id nil))
+  ([fn-id anchor-y]
+   (change! #(double-tap-node % fn-id) anchor-y)))
+
+(defn set-measured-height! [fn-id h]
+  (change! #(set-measured-height % fn-id h) nil))
 
 (defn move-card! [fn-id dx dy origin-x origin-y]
   (swap! state update-in [:shown fn-id]
          (fn [pos] (assoc pos :x (+ origin-x dx) :y (+ origin-y dy)))))
-
-(defn toggle-nested!
-  "Flip the Xcode-style disclosure on a nested function. Collapsed nesteds
-   render as `fn(...) { … }` pills; expanded ones render their body inline
-   with their own children still starting collapsed. The card's size changes,
-   so we refit according to the current :fit-mode."
-  [nested-id]
-  (when nested-id
-    (swap! state update :expanded-nested
-           (fn [s] (if (contains? s nested-id)
-                     (disj s nested-id)
-                     (conj (or s #{}) nested-id))))
-    (reflow!)
-    (refit!)))
-
-(defn double-tap-node!
-  "Toggle between :all (fit whole graph) and :solo (fit just the focused
-   node). Entering :solo uses the tapped card as the new focused + fit
-   target. Exiting to :all frames the whole graph. The mode persists —
-   subsequent layout changes, toggle-nested, and even single-tap on a
-   different card re-fit according to the active mode.
-
-   `anchor-y` (optional world-Y) biases solo-mode vertical framing on tall
-   nodes — see refit!."
-  ([fn-id] (double-tap-node! fn-id nil))
-  ([fn-id anchor-y]
-   (when (and fn-id (contains? (:shown @state) fn-id))
-     (if (= :solo (:fit-mode @state))
-       (do (swap! state assoc :fit-mode :all)
-           (refit!))
-       (do (swap! state assoc :fit-mode :solo)
-           ;; focus! also calls refit! — which in :solo frames fn-id.
-           (focus! fn-id anchor-y))))))
 
 ;; --- Init -----------------------------------------------------------------
 
