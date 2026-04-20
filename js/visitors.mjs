@@ -41,20 +41,40 @@ export function parseFile(filePath, code, rootDir) {
     return null;
   }
 
-  function addNode(name, type, astNode, p) {
-    if (declared.has(name)) return declared.get(name);
+  function buildSignature(astNode) {
+    // Slice each param's own source range so defaults, rest, and destructuring
+    // patterns round-trip exactly as written instead of being re-stringified.
+    if (!Array.isArray(astNode.params)) return null;
+    return astNode.params.map(pr => code.slice(pr.start, pr.end)).join(', ');
+  }
+
+  function addNode(name, type, astNode, p, opts = {}) {
+    const { registerInDeclared = true } = opts;
+    // `declared` is the call-resolver's bare-name lookup; only true top-level
+    // bindings should populate it so a local object-property named `parse`
+    // doesn't shadow an imported `parse` in the same file.
+    if (registerInDeclared && declared.has(name)) return declared.get(name);
     const line = astNode.loc.start.line;
     const id = nodeId(name, line);
     const source = code.slice(astNode.start, astNode.end);
     const parentId = p ? nearestCapturedAncestor(p) : null;
+    const signature = (type === 'function' || type === 'method')
+      ? `${name}(${buildSignature(astNode) || ''})`
+      : null;
     nodes.push({
-      id, name, type, file: filePath, line, source,
+      id, name, type, file: filePath, line, source, signature,
       start: astNode.start, end: astNode.end, parentId,
     });
-    declared.set(name, id);
+    if (registerInDeclared) declared.set(name, id);
     fnNodeToId.set(astNode, id);
     return id;
   }
+
+  // Expression-body arrows (one-liners) are too small to warrant their own
+  // card — they'd just duplicate the source line above. Block-body functions
+  // (FunctionExpression or arrow with `{ ... }`) still get captured.
+  const hasBlockBody = (astNode) =>
+    astNode.body && astNode.body.type === 'BlockStatement';
 
   traverse(ast, {
     FunctionDeclaration(p) {
@@ -64,6 +84,7 @@ export function parseFile(filePath, code, rootDir) {
       const init = p.node.init;
       if (!init || p.node.id.type !== 'Identifier') return;
       if (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression') {
+        if (!hasBlockBody(init)) return;
         addNode(p.node.id.name, 'function', init, p);
       } else if (!p.getFunctionParent()) {
         // Top-level const/let/var only — locals inside function bodies
@@ -78,6 +99,24 @@ export function parseFile(filePath, code, rootDir) {
     ClassMethod(p) {
       if (p.node.key.type === 'Identifier') {
         addNode(p.node.key.name, 'method', p.node, p);
+      }
+    },
+    ObjectMethod(p) {
+      // Methods on object literals passed as arguments — e.g. visitor tables
+      // like `traverse(ast, { CallExpression(p) {...} })` — render as their
+      // own nested cards, but must NOT be registered in `declared`: the same
+      // key name (e.g. `parse`) can appear in many object literals and would
+      // otherwise shadow an imported `parse` for call resolution.
+      if (p.node.key.type === 'Identifier') {
+        addNode(p.node.key.name, 'function', p.node, p, { registerInDeclared: false });
+      }
+    },
+    ObjectProperty(p) {
+      const val = p.node.value;
+      if (p.node.key.type !== 'Identifier' || !val) return;
+      if (val.type === 'ArrowFunctionExpression' || val.type === 'FunctionExpression') {
+        if (!hasBlockBody(val)) return;
+        addNode(p.node.key.name, 'function', val, p, { registerInDeclared: false });
       }
     },
     ImportDeclaration(p) {
@@ -118,7 +157,7 @@ export function parseFile(filePath, code, rootDir) {
 
 export function collectCalls(file, allFiles) {
   const edges = [];
-  const { ast, declared, importBindings } = file;
+  const { ast, declared, importBindings, fnNodeToId } = file;
 
   function resolveCallee(name) {
     if (declared.has(name)) return declared.get(name);
@@ -150,22 +189,12 @@ export function collectCalls(file, allFiles) {
 
       const enclosing = p.getFunctionParent();
       if (!enclosing) return;
-
-      let enclosingName = null;
-      const n = enclosing.node;
-      if (n.type === 'FunctionDeclaration' && n.id) {
-        enclosingName = n.id.name;
-      } else if (n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression') {
-        const parent = enclosing.parent;
-        if (parent.type === 'VariableDeclarator' && parent.id.type === 'Identifier') {
-          enclosingName = parent.id.name;
-        }
-      } else if (n.type === 'ClassMethod' && n.key.type === 'Identifier') {
-        enclosingName = n.key.name;
-      }
-
-      if (!enclosingName) return;
-      const fromId = declared.get(enclosingName);
+      // Look up the enclosing node directly in fnNodeToId (set at capture
+      // time) instead of re-deriving a bare name. This unifies every captured
+      // shape (FunctionDeclaration, VariableDeclarator-bound fn, ClassMethod,
+      // ObjectMethod, function-valued ObjectProperty) and correctly drops
+      // edges that originate inside uncaptured anonymous fns.
+      const fromId = fnNodeToId.get(enclosing.node);
       if (!fromId || fromId === toId) return;
 
       // Offsets are relative to the enclosing function so the renderer can

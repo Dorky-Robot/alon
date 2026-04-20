@@ -1,191 +1,323 @@
 (ns alon-ui.file-card
   (:require [alon-ui.state :as state]
+            [alon-ui.highlight :as hi]
             [reagent.core :as r]
             [clojure.string :as str]))
 
-(def CARD-WIDTH       320)   ; fallback when state has no width for a file
-(def ROW-H            34)
-(def CONTAINER-PAD    10)    ; matches CSS .body.container padding
-(def CONTAINER-GAP     8)    ; matches CSS .body.container gap
+;; Each card renders ONE function's source. Outbound call edges whose target
+;; is resolvable are spliced into the source as clickable blue spans — click
+;; a call to spawn a new box for the callee.
+;;
+;; Nested function/method declarations inside the body collapse to a single
+;; `signature { … }` pill by default, Xcode-style — click to expand, click
+;; again to collapse. Each nested carries its own disclosure state; expanding
+;; a parent does NOT auto-expand its children. Call-links inside collapsed
+;; nesteds are hidden (no visible span) and their arrows anchor on the pill.
 
-(defn width-for [file]
-  (or (get-in @state/state [:width-by-file file]) CARD-WIDTH))
+(def CARD-WIDTH      320)
+(def ROW-H           34)
+(def LINE-H          16)
+(def CHAR-W          6.6)
+(def SOURCE-PAD-X    14)
+(def SOURCE-PAD-TOP  6)
+(def SOURCE-PAD-BOT  12)
 
-(def LINE-H           16)
-(def SOURCE-PAD-TOP   6)
-(def SOURCE-PAD-BOT   12)
+(defn width-for [fn-id]
+  (or (get-in @state/state [:width-by-id fn-id]) CARD-WIDTH))
 
-(declare row)
+(defn- relative-to-root
+  "Strip the entry file's directory from `file` so the dismiss chip reads
+   `subdir/name.mjs:fn` rather than the absolute path. Falls back to the
+   basename if `file` doesn't sit under the entry's directory."
+  [file root]
+  (if (and (string? file) (string? root))
+    (let [slash  (str/last-index-of root "/")
+          prefix (when slash (subs root 0 (inc slash)))]
+      (cond
+        (and prefix (str/starts-with? file prefix))
+        (subs file (count prefix))
+
+        :else
+        (let [i (str/last-index-of file "/")]
+          (if i (subs file (inc i)) file))))
+    (or file "")))
+
+(defn- count-newlines [s]
+  (if (string? s)
+    (count (filter #(= % \newline) s))
+    0))
 
 (defn- line-count [s]
   (if (string? s)
-    (inc (count (filter #(= % \newline) s)))
+    (inc (count-newlines s))
     0))
 
 (defn source-height
-  "Height in canvas pixels of a rendered source-text segment. Matches the
-   fixed line-height/padding values in the CSS so edges can anchor analytically."
+  "Height in canvas pixels of a rendered source block. Matches the CSS
+   padding/line-height so edges can anchor analytically without measuring."
   [s]
   (if (and (string? s) (pos? (count s)))
     (+ SOURCE-PAD-TOP (* (line-count s) LINE-H) SOURCE-PAD-BOT)
     0))
 
-(defn- ordered-children
-  "Direct children of `parent-id`, in declaration order."
-  [parent-id]
-  (let [{:keys [children-of by-id]} @state/state]
-    (->> (get children-of parent-id [])
-         (keep by-id)
-         (sort-by :start))))
+;; --- Plan building -------------------------------------------------------
+;;
+;; plan-for walks a renderable function's source and produces a flat
+;; segment sequence in display order. Each segment carries its source-local
+;; [os, oe) range plus the :line-start at which its first character
+;; displays. Collapsed nesteds replace their body range with a one-line
+;; pill, compressing the display; expanded nesteds are transparent — their
+;; body text and any call-sites inside pass through as regular segments,
+;; and their own descendants still start collapsed until clicked.
 
-(defn row-height
-  "Total pixel height of a row given current expanded state.
+(defn- fn-like? [node]
+  (and node (#{"function" "method"} (:type node))))
 
-   When expanded, a node with captured children becomes a container —
-   its body holds child rows in a vertical stack. Otherwise an expanded
-   leaf shows its source. Collapsed rows are just the row-head."
-  [node]
-  (let [{:keys [expanded]} @state/state
-        open? (contains? expanded (:id node))
-        kids  (when open? (ordered-children (:id node)))]
-    (+ ROW-H
-       (cond
-         (not open?)    0
-         (seq kids)     (+ CONTAINER-PAD
-                           (reduce + (map row-height kids))
-                           (* CONTAINER-GAP (max 0 (dec (count kids))))
-                           CONTAINER-PAD)
-         (:source node) (source-height (:source node))
-         :else          0))))
+(defn- visible-nested-kids
+  "All nested fn/method descendants of `renderable-id` that should appear
+   in its plan. Collapsed ones emit as a `foo() { … }` pill; expanded ones
+   emit a zero-length ▾ expander at their start so users can re-collapse.
+   Expanded nesteds are otherwise transparent — we descend into them so
+   grand-descendants also get their own pill/expander segments."
+  [by-id children-of expanded-set renderable-id R-start]
+  (letfn [(walk [acc node-id]
+            (reduce
+             (fn [acc cid]
+               (let [child (get by-id cid)]
+                 (if (fn-like? child)
+                   (let [expanded? (contains? expanded-set cid)
+                         seg {:node child
+                              :os (- (:start child) R-start)
+                              :oe (- (:end   child) R-start)
+                              :collapsed? (not expanded?)}
+                         acc' (conj acc seg)]
+                     (if expanded? (walk acc' cid) acc'))
+                   acc)))
+             acc
+             (get children-of node-id [])))]
+    (walk [] renderable-id)))
 
-(defn row-top-y
-  "Y offset of the row-head top for `node-id` within its file-card.
-   Walks the ancestor chain so nested rows know where they live."
-  [node-id]
-  (let [{:keys [by-id by-file]} @state/state
-        node (get by-id node-id)]
-    (when node
-      (if-let [pid (:parentId node)]
-        (let [siblings (ordered-children pid)
-              before   (loop [ss siblings, y 0]
-                         (if-let [s (first ss)]
-                           (if (= (:id s) node-id)
-                             y
-                             (recur (rest ss)
-                                    (+ y (row-height s) CONTAINER-GAP)))
-                           y))]
-          (+ (row-top-y pid) ROW-H CONTAINER-PAD before))
-        (let [siblings (get by-file (:file node))]
-          (loop [ss siblings, y 0]
-            (if-let [s (first ss)]
-              (if (= (:id s) node-id)
-                y
-                (recur (rest ss) (+ y (row-height s))))
-              y)))))))
+(defn- nested-sig
+  "One-line pill text for a collapsed nested. Takes the prefix up to the
+   first `{` in the nested's source, whitespace-collapses it, and appends
+   ` { … }`. Falls back to the nested's name if we can't find a brace."
+  [node R-source os oe]
+  (let [body  (subs R-source os (min oe (count R-source)))
+        brace (str/index-of body "{")
+        prefix (if brace
+                 (subs body 0 brace)
+                 (or (:name node) "fn"))
+        one-line (-> prefix
+                     (str/replace #"\s+" " ")
+                     str/trim)]
+    (str one-line " { … }")))
 
-(defn row-y-center [node-id]
-  (+ (row-top-y node-id) (/ ROW-H 2)))
+(defn- advance-by [line text]
+  (+ line (count-newlines text)))
 
-(defn- source-line-y
-  "Vertical center (within a source block) of the line that contains
-   character `offset`."
-  [src offset]
-  (let [before (subs src 0 (min offset (count src)))
-        nls    (count (filter #(= % \newline) before))]
-    (+ SOURCE-PAD-TOP (* nls LINE-H) (/ LINE-H 2))))
+(defn- candidate->segment
+  "Expand a candidate into its full display segment, given the offset
+   `os` at which its prefix text starts, the source it slices from, and
+   the display line its first char lands on."
+  [R-source c line]
+  (let [{:keys [os oe]} c]
+    (case (:kind c)
+      :call
+      {:kind :call :os os :oe oe :edge (:edge c)
+       :text (subs R-source os oe)
+       :line-start line}
+
+      :nested-collapsed
+      {:kind :nested-collapsed :os os :oe oe :node (:node c)
+       :text (nested-sig (:node c) R-source os oe)
+       :line-start line}
+
+      :nested-expander
+      ;; Zero-length: the body passes through as text/calls and the ▾
+      ;; sits just before the `function` keyword.
+      {:kind :nested-expander :os os :oe os :node (:node c)
+       :text "▾" :line-start line})))
+
+(defn- step-candidate
+  "Reducer step: extend the accumulating plan with any gap-text before
+   `c` and `c`'s own segment. Drops `c` when it overlaps a segment already
+   emitted (a call-site inside a collapsed nested's range, for instance)."
+  [R-source {:keys [cur line acc] :as acc-state} c]
+  (let [os (:os c)]
+    (if (< os cur)
+      acc-state
+      (let [before (subs R-source cur os)
+            acc1   (cond-> acc
+                     (pos? (count before))
+                     (conj {:kind :text :os cur :oe os
+                            :text before :line-start line}))
+            line1  (advance-by line before)
+            seg    (candidate->segment R-source c line1)]
+        {:cur (:oe seg)
+         :line (advance-by line1 (:text seg))
+         :acc (conj acc1 seg)}))))
+
+(defn plan-for
+  "Build a segment plan for rendering renderable R's source given call
+   edges (already lifted to R-local offsets) and its nested descendants.
+
+   Returns a vector of segments, each with:
+     :kind       :text | :call | :nested-collapsed | :nested-expander
+     :os :oe     source-local offsets (R-source coords)
+     :text       display text
+     :line-start display-line index of the segment's first char
+   :call adds :edge; :nested-* add :node.
+
+   :nested-expander is zero-length (:os == :oe) and renders as a clickable
+   ▾ glyph just before an expanded nested's signature — clicking it collapses
+   the block back to its pill form, IDE-fold style."
+  [R-source edges nested-kids]
+  (if-not (string? R-source)
+    []
+    (let [len (count R-source)
+          collapsed-ranges (for [k nested-kids :when (:collapsed? k)]
+                             [(:os k) (:oe k)])
+          inside-collapsed? (fn [o]
+                              (some (fn [[ns ne]] (and (<= ns o) (< o ne)))
+                                    collapsed-ranges))
+          call-cands (for [e edges
+                           :let [os (:offsetStart e)
+                                 oe (:offsetEnd   e)]
+                           :when (and os oe
+                                      (<= 0 os) (<= oe len)
+                                      (< os oe)
+                                      (not (inside-collapsed? os)))]
+                       {:kind :call :os os :oe oe :edge e})
+          nested-cands (for [{:keys [node os oe collapsed?]} nested-kids
+                             :when (and os oe (<= 0 os) (< os oe) (<= oe len))]
+                         (if collapsed?
+                           {:kind :nested-collapsed :os os :oe oe :node node}
+                           {:kind :nested-expander  :os os :oe os :node node}))
+          candidates (sort-by :os (concat nested-cands call-cands))
+          {:keys [cur line acc]}
+          (reduce (partial step-candidate R-source)
+                  {:cur 0 :line 0 :acc []}
+                  candidates)
+          tail (subs R-source cur len)]
+      (cond-> acc
+        (pos? (count tail))
+        (conj {:kind :text :os cur :oe len
+               :text tail :line-start line})))))
+
+(defn- compute-plan
+  "Collect what plan-for needs for a renderable fn-id from the current
+   app state."
+  [s fn-id]
+  (when-let [node (get-in s [:by-id fn-id])]
+    (let [edges       (get-in s [:edges-by-from fn-id] [])
+          nested-kids (visible-nested-kids (:by-id s)
+                                           (:children-of s)
+                                           (or (:expanded-nested s) #{})
+                                           fn-id
+                                           (:start node))]
+      (plan-for (:source node) edges nested-kids))))
+
+(defn- seg-containing [plan offset]
+  (some (fn [seg]
+          (when (and (<= (:os seg) offset) (< offset (:oe seg)))
+            seg))
+        plan))
 
 (defn call-site-y
-  "Absolute y of a call-site at `offset` within `node-id`'s card. Only
-   meaningful for an expanded leaf — a container shows child rows instead
-   of source, so there's no line to anchor to."
-  [node-id offset]
-  (let [{:keys [by-id expanded children-of]} @state/state
-        node  (get by-id node-id)
-        leaf? (empty? (get children-of node-id))
-        open? (contains? expanded node-id)]
-    (when (and open? leaf? (:source node) offset)
-      (+ (row-top-y node-id) ROW-H
-         (source-line-y (:source node) offset)))))
+  "Absolute y (in canvas coords) of the call at `offset` inside `fn-id`'s
+   box. Uses the current plan so collapsed nesteds don't throw off the
+   line math — a call-site inside a collapsed nested anchors on the pill."
+  [fn-id offset]
+  (let [s   @state/state
+        pos (get-in s [:shown fn-id])]
+    (when (and pos offset)
+      (when-let [plan (compute-plan s fn-id)]
+        (let [seg (seg-containing plan offset)
+              line (cond
+                     (nil? seg) 0
+                     (= :text (:kind seg))
+                     (+ (:line-start seg)
+                        (count-newlines
+                         (subs (:text seg) 0
+                               (min (- offset (:os seg))
+                                    (count (:text seg))))))
+                     :else (:line-start seg))]
+          (+ (:y pos) ROW-H SOURCE-PAD-TOP (* line LINE-H) (/ LINE-H 2)))))))
 
-(defn row-depth
-  "How many captured-fn ancestors `node-id` has. Top-level = 0."
-  [node-id]
-  (loop [id node-id, d 0]
-    (if-let [pid (:parentId (get-in @state/state [:by-id id]))]
-      (recur pid (inc d))
-      d)))
+;; --- Render --------------------------------------------------------------
 
-(defn row-x-inset
-  "Horizontal padding (each side) consumed by container ancestors before a
-   nested row's edge. Lets edges anchor at the nested card's own border
-   instead of swooping out to the outer file-card edge."
-  [node-id]
-  (* CONTAINER-PAD (row-depth node-id)))
+(defn- tokenized-spans
+  "Render plain source text as per-token spans so the stylesheet can paint
+   keywords/strings/etc. Whitespace runs come back as one :class nil span,
+   so this doesn't explode into one element per character."
+  [text key-prefix]
+  (map-indexed
+   (fn [i t]
+     ^{:key (str key-prefix "-" i)}
+     [:span (when (:class t) {:class (str "tok-" (name (:class t)))})
+      (:text t)])
+   (hi/tokenize text)))
 
-(defn- short-path [file]
-  (let [parts (str/split file #"/")
-        n     (count parts)]
-    (if (>= n 2)
-      (str/join "/" (subvec (vec parts) (max 0 (- n 2))))
-      file)))
+(defn- render-segment [from-id s i seg]
+  (case (:kind seg)
+    :text
+    (tokenized-spans (:text seg) (str "t" i))
 
-(defn row
-  "Recursive renderer. `start-drag` is closed over by the file-card so all
-   nested rows share its drag state and lifecycle. Expanded nodes with
-   captured children render in container mode (children as nested rows);
-   leaves render their source."
-  [start-drag node]
-  (let [{:keys [expanded focused trail]} @state/state
-        {:keys [id name type source]} node
-        open?     (contains? expanded id)
-        kids      (when open? (ordered-children id))
-        has-kids? (seq kids)
-        focused?  (= id focused)
-        trail?    (some #(= % id) trail)]
-    [:div.row {:class (cond-> []
-                        open?     (conj "expanded")
-                        has-kids? (conj "container")
-                        focused?  (conj "focused")
-                        trail?    (conj "trail"))}
-     [:div.row-head
-      {:on-mouse-down (fn [e] (start-drag id e))}
-      [:span.kind type]
-      [:span.name name]]
-     (when open?
-       (cond
-         has-kids?
-         (into [:div.body.container
-                {:on-mouse-down (fn [e] (.stopPropagation e))}]
-               (for [k kids]
-                 ^{:key (:id k)} [row start-drag k]))
+    :call
+    (let [to-id  (:to (:edge seg))
+          callee (get-in s [:by-id to-id])]
+      [^{:key (str "c" i)}
+       [:span.call
+        {:title (str "spawn " (:name callee))
+         :on-mouse-down    (fn [e] (.stopPropagation e))
+         :on-double-click  (fn [e] (.stopPropagation e))
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/spawn-call! from-id to-id))}
+        (:text seg)]])
 
-         source
-         [:div.body
-          {:on-mouse-down (fn [e] (.stopPropagation e))}
-          [:pre.source source]]))]))
+    :nested-collapsed
+    (let [n (:node seg)]
+      [^{:key (str "n" i)}
+       [:span.nested-collapsed
+        {:title (str "expand " (:name n))
+         :on-mouse-down    (fn [e] (.stopPropagation e))
+         :on-double-click  (fn [e] (.stopPropagation e))
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/toggle-nested! (:id n)))}
+        (:text seg)]])
 
-(defn file-card [file]
+    :nested-expander
+    (let [n (:node seg)]
+      [^{:key (str "e" i)}
+       [:span.nested-expander
+        {:title (str "collapse " (:name n))
+         :on-mouse-down    (fn [e] (.stopPropagation e))
+         :on-double-click  (fn [e] (.stopPropagation e))
+         :on-click (fn [e]
+                     (.stopPropagation e)
+                     (state/toggle-nested! (:id n)))}
+        (:text seg)]])))
+
+(defn fn-card [fn-id]
   (let [drag-state (r/atom nil)
         el-ref     (atom nil)
-        ;; Measure the card's true rendered height and let state decide
-        ;; whether anything needs to reflow. offsetHeight is in unscaled
-        ;; CSS pixels even when an ancestor has a CSS transform, which is
-        ;; exactly the coordinate space our layout math works in.
         measure!   (fn []
                      (when-let [el @el-ref]
-                       (state/set-measured-height! file (.-offsetHeight el))))
+                       (state/set-measured-height! fn-id (.-offsetHeight el))))
         on-move    (fn [e]
                      (when-let [d @drag-state]
                        (let [dx (/ (- (.-clientX e) (:mouse-x d)) (:zoom d))
                              dy (/ (- (.-clientY e) (:mouse-y d)) (:zoom d))]
                          (when (> (Math/hypot dx dy) 3)
                            (swap! drag-state assoc :moved? true))
-                         (state/move-card! file dx dy (:start-x d) (:start-y d)))))
+                         (state/move-card! fn-id dx dy (:start-x d) (:start-y d)))))
         on-up      (fn [_]
                      (let [d @drag-state]
                        (reset! drag-state nil)
-                       (when (and d (not (:moved? d)) (:click-id d))
-                         (state/focus! (:click-id d)))))]
+                       (when (and d (not (:moved? d)))
+                         (state/focus! fn-id))))]
     (r/create-class
      {:component-did-mount
       (fn [_]
@@ -199,37 +331,66 @@
         (.removeEventListener js/window "mousemove" on-move)
         (.removeEventListener js/window "mouseup"   on-up))
       :reagent-render
-      (fn [file]
-        (let [{:keys [by-file shown]} @state/state
-              top-nodes (get by-file file)
-              pos       (get shown file)
-              dragging? (some? @drag-state)
-              start-drag (fn [click-id e]
+      (fn [fn-id]
+        (let [s          @state/state
+              node       (get-in s [:by-id fn-id])
+              pos        (get-in s [:shown fn-id])
+              focused?   (= fn-id (:focused s))
+              trail?     (some #(= % fn-id) (:trail s))
+              plan       (compute-plan s fn-id)
+              dragging?  (some? @drag-state)
+              start-drag (fn [e]
                            (when (zero? (.-button e))
                              (.stopPropagation e)
                              (reset! drag-state
-                                     {:start-x  (:x pos)
-                                      :start-y  (:y pos)
-                                      :mouse-x  (.-clientX e)
-                                      :mouse-y  (.-clientY e)
-                                      :zoom     (:zoom @state/state)
-                                      :click-id click-id
-                                      :moved?   false})))]
+                                     {:start-x (:x pos)
+                                      :start-y (:y pos)
+                                      :mouse-x (.-clientX e)
+                                      :mouse-y (.-clientY e)
+                                      :zoom    (:zoom s)
+                                      :moved?  false})))]
           [:div.file-card
            {:class (cond-> []
                      (:root? pos) (conj "root")
+                     focused?     (conj "focused")
+                     trail?       (conj "trail")
                      dragging?    (conj "dragging"))
             :ref   (fn [el] (reset! el-ref el))
-            :style {:left (:x pos) :top (:y pos) :width (width-for file)}}
-           (into [:div.card]
-                 (for [n top-nodes]
-                   ^{:key (:id n)} [row start-drag n]))
-           [:div.path
-            {:on-mouse-down (fn [e] (start-drag nil e))}
-            [:span.dismiss
-             {:title "dismiss this file (and everything it brought in)"
-              :on-mouse-down (fn [e]
+            :style {:left (:x pos) :top (:y pos) :width (width-for fn-id)}
+            ;; Click anywhere in the card (body whitespace, source non-text)
+            ;; focuses it. Interactive children (call-link, pill, expander,
+            ;; dismiss) stopPropagation on click, so they keep their own
+            ;; semantics. row-head/path also route through focus! via the
+            ;; drag-end handler on drag-with-no-move, which is idempotent.
+            :on-click (fn [e]
+                        (.stopPropagation e)
+                        (state/focus! fn-id (state/client-y->world-y (.-clientY e))))
+            :on-double-click (fn [e]
                                (.stopPropagation e)
-                               (state/dismiss-file! file))}
-             "×"]
-            (short-path file)]]))})))
+                               (state/double-tap-node!
+                                fn-id (state/client-y->world-y (.-clientY e))))}
+           [:div.card
+            [:div.row
+             [:div.row-head
+              {:on-mouse-down start-drag}
+              [:span.kind (:type node)]
+              [:span.name (or (:signature node) (:name node))]]
+             (when (:source node)
+               (into [:pre.source
+                      {:on-mouse-down (fn [e] (.stopPropagation e))
+                       ;; Let native dblclick = word-select work inside source.
+                       :on-double-click (fn [e] (.stopPropagation e))}]
+                     (mapcat (fn [i seg] (render-segment fn-id s i seg))
+                             (range) plan)))]]
+           (when-not (:root? pos)
+             [:div.path
+              {:on-mouse-down start-drag}
+              [:span.dismiss
+               {:title "dismiss this box (and everything it spawned)"
+                :on-double-click (fn [e] (.stopPropagation e))
+                :on-mouse-down (fn [e]
+                                 (.stopPropagation e)
+                                 (state/dismiss! fn-id))}
+               "×"]
+              (str (relative-to-root (:file node) (get-in s [:graph :root]))
+                   ":" (:name node))])]))})))

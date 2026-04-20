@@ -6,8 +6,17 @@
   "private": true,
   "author": "Felix Flores",
   "license": "ISC",
+  "scripts": {
+    "test:js": "node --test 'test/js/*.test.mjs'",
+    "test:cljs": "nbb test/alon_ui/runner.cljs",
+    "test": "npm run test:js && npm run test:cljs"
+  },
   "dependencies": {
     "@babel/parser": "^7.29.2",
     "@babel/traverse": "^7.29.0"
+  },
+  "devDependencies": {
+    "nbb": "^1.4.207",
+    "react": "^18.3.1"
   }
 }
